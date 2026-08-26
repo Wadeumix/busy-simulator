@@ -398,14 +398,18 @@ document.addEventListener("click", (e) => {
 });
 
 // ---- 10ログ消化ごとのボーナス抽選 ----
-// 上から下へ確率が減っていく。ログキュー増加グループが初期値80%、倍率グループが20%
+// 上から下へ確率が減っていく。ハズレが最も高確率、×20 JACKPOTが最も低確率
+// ジャックポット(バラージ)は0.5秒ラッシュ中でも重ねて適用される(倍率バフも乗る)
 const BONUS_TABLE = [
-  { weight: 45, label: "queue +5",  sub: "ログキューが5件増加",            apply: () => { state.pendingPulls += 5;  renderQueue(); } },
-  { weight: 25, label: "queue +10", sub: "ログキューが10件増加",           apply: () => { state.pendingPulls += 10; renderQueue(); } },
-  { weight: 10, label: "queue +20", sub: "ログキューが20件増加",           apply: () => { state.pendingPulls += 20; renderQueue(); } },
-  { weight: 9,  label: "×2 boost",  sub: "次の5ログ分の獲得revが2倍",       apply: () => { state.activeBuff = { remaining: 5,  multiplier: 2 }; saveState(); } },
-  { weight: 6,  label: "×2 boost+", sub: "次の20ログ分の獲得revが2倍",      apply: () => { state.activeBuff = { remaining: 20, multiplier: 2 }; saveState(); } },
-  { weight: 5,  label: "×5 JACKPOT",sub: "次の20ログ分の獲得revが5倍",      apply: () => { state.activeBuff = { remaining: 20, multiplier: 5 }; saveState(); injectBarrage(50); } },
+  { weight: 40, label: "ハズレ",     sub: "特に変化なし",                    apply: () => {} },
+  { weight: 25, label: "queue +5",  sub: "ログキューが5件増加",              apply: () => { state.pendingPulls += 5;  renderQueue(); } },
+  { weight: 15, label: "queue +10", sub: "ログキューが10件増加",             apply: () => { state.pendingPulls += 10; renderQueue(); } },
+  { weight: 8,  label: "queue +20", sub: "ログキューが20件増加",             apply: () => { state.pendingPulls += 20; renderQueue(); } },
+  { weight: 6,  label: "×2 boost",  sub: "次の5ログ分の獲得revが2倍",         apply: () => { state.activeBuff = { remaining: 5,  multiplier: 2 }; saveState(); } },
+  { weight: 3,  label: "×2 boost+", sub: "次の20ログ分の獲得revが2倍",        apply: () => { state.activeBuff = { remaining: 20, multiplier: 2 }; saveState(); } },
+  // ルーレット要素は後ほど拡張予定。現状は暫定でキュー+1のみ
+  { weight: 2,  label: "roulette",  sub: "ルーレットログが1件キューに追加",   apply: () => { state.pendingPulls += 1; renderQueue(); } },
+  { weight: 1,  label: "×20 JACKPOT", sub: "次の20ログ分の獲得revが20倍 + 無償ログ100件が割り込み", apply: () => { state.activeBuff = { remaining: 20, multiplier: 20 }; saveState(); injectBarrage(100); } },
 ];
 const BONUS_TOTAL_WEIGHT = BONUS_TABLE.reduce((a, b) => a + b.weight, 0);
 let bonusHideTimer = null;
@@ -572,7 +576,14 @@ function tick(){
   if(state.priorityPulls > 0){
     state.priorityPulls--;
     renderQueue();
-    addCoins(PRIORITY_PULL_REWARD);
+
+    let rushReward = PRIORITY_PULL_REWARD;
+    if(state.activeBuff && state.activeBuff.remaining > 0){
+      rushReward *= state.activeBuff.multiplier;
+      state.activeBuff.remaining--;
+      if(state.activeBuff.remaining <= 0) state.activeBuff = null;
+    }
+    addCoins(rushReward);
 
     state.resolvedSincePopup++;
     if(state.resolvedSincePopup >= 10){
