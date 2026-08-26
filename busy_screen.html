@@ -8,7 +8,7 @@
     --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9;
     --accent:#58a6ff; --green:#3fb950; --dim:#8b949e;
   }
-  *{box-sizing:border-box;}
+  *{box-sizing:border-box; cursor:wait;}
   html,body{ height:100%; }
   body{
     margin:0; background:var(--panel); color:var(--text);
@@ -81,7 +81,7 @@
     font-family:inherit; font-size:12px; color:var(--dim);
     width:64px; caret-color:var(--dim);
   }
-  #cmdInput:focus{ width:220px; }
+  #cmdInput:focus{ width:220px; cursor:text; }
 
   /* ---- スキン(見た目)プリセット ---- */
   body.skin-neon .bar-inner{ background:linear-gradient(90deg,#d63bff,#39ffe0) !important; }
@@ -103,6 +103,7 @@
         <span id="pct">0%</span>
         <span id="statusText">initializing…</span>
         <span id="durText" class="dimmed"></span>
+        <span id="queueText" class="dimmed"></span>
         <span id="coinText" class="dimmed"></span>
         <input id="cmdInput" type="text" autocomplete="off" spellcheck="false">
       </div>
@@ -115,6 +116,7 @@ const bar = document.getElementById("bar");
 const pct = document.getElementById("pct");
 const statusText = document.getElementById("statusText");
 const durText = document.getElementById("durText");
+const queueText = document.getElementById("queueText");
 const coinText = document.getElementById("coinText");
 const cmdInput = document.getElementById("cmdInput");
 const clock = document.getElementById("clock");
@@ -224,10 +226,6 @@ function pickBucket(){
   return chosen.seconds !== null ? chosen.seconds : randInt(1, 4);
 }
 
-function randLineDurationMs(){
-  return pickBucket() * 1000;
-}
-
 // ---- 秒数(レア度) → コイン報酬 の対応テーブル ----
 const REWARD_TABLE = {
   1:1, 2:1, 3:1, 4:1,
@@ -335,19 +333,17 @@ function passiveIncomeTick(){
 }
 setTimeout(passiveIncomeTick, BASE_INCOME_INTERVAL_MS);
 
-// ---- クリックによる手動プル ----
-function manualPull(){
-  const seconds = pickBucket();
-  const reward = REWARD_TABLE[seconds] || 1;
-  appendLogLine();
-  addCoins(reward);
-  if(seconds === 20){
-    triggerCriticalEvent(2500);
-  }
+// ---- クリックによる「処理待ちログ」の積み上げ ----
+// クリックはその場で抽選しない。キューに積むだけで、実際の抽選(コイン化)は
+// 通常のtick()が回ってきた時に、そのtickの結果を使って初めて行われる
+let pendingPulls = 0;
+function renderQueue(){
+  queueText.textContent = pendingPulls > 0 ? `queue:${pendingPulls}` : "";
 }
 document.addEventListener("click", (e) => {
   if(e.target === cmdInput) return;
-  manualPull();
+  pendingPulls++;
+  renderQueue();
 });
 
 // ---- アップグレードのコスト計算 ----
@@ -449,9 +445,17 @@ function tick(){
   appendLogLine();
 
   // このログ行の「処理時間」としてバーを0→100%までアニメーション
-  const duration = randLineDurationMs();
+  const seconds = pickBucket();
+  const duration = seconds * 1000;
 
-  if(duration === 20000){
+  // 処理待ちキューが残っていれば、このtickの抽選結果を1件分だけ消化してコイン化する
+  if(pendingPulls > 0){
+    pendingPulls--;
+    renderQueue();
+    addCoins(REWARD_TABLE[seconds] || 1);
+  }
+
+  if(seconds === 20){
     triggerCriticalEvent(duration);
   } else {
     statusText.textContent = "processing…";
