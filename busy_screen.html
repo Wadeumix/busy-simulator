@@ -599,25 +599,15 @@ function spinRouletteOnce(win, onDone){
   const LOOPS = randInt(12, 20);
   const totalSteps = LOOPS * segments.length + targetIndex + 1;
 
-  // 最後の1/15区間に入るまでは等速(高速)で進み、そこから減速して当選コマにぴったり止まる
-  const DECEL_FRACTION = 1 / 4;
-  const decelStartStep = Math.max(1, Math.floor(totalSteps * (1 - DECEL_FRACTION)));
-  const fastSteps = decelStartStep;
-  const decelSteps = totalSteps - decelStartStep;
-
-  const FAST_DELAY_MS = 15;
-  const fastTotal = fastSteps * FAST_DELAY_MS;
-  const remainingTime = Math.max(0, TOTAL_SPIN_MS - fastTotal);
-
-  const decelWeights = [];
-  for(let i = 0; i < decelSteps; i++){
-    decelWeights.push(Math.pow((i + 1) / decelSteps, 4));
+  // 全区間にわたって減速させる。カーブはsmoothstep(3t²-2t³)を使い、
+  // 序盤・終盤がなだらかで中盤の変化が大きいS字型の減速になるようにする
+  const weights = [];
+  for(let i = 0; i < totalSteps; i++){
+    const t = (i + 1) / totalSteps;
+    weights.push(t * t * (3 - 2 * t));
   }
-  const decelWeightSum = decelWeights.reduce((a, b) => a + b, 0) || 1;
-
-  const delays = [];
-  for(let i = 0; i < fastSteps; i++) delays.push(FAST_DELAY_MS);
-  for(let i = 0; i < decelSteps; i++) delays.push((decelWeights[i] / decelWeightSum) * remainingTime);
+  const weightSum = weights.reduce((a, b) => a + b, 0) || 1;
+  const delays = weights.map(w => (w / weightSum) * TOTAL_SPIN_MS);
 
   let step = 0;
   let prevTile = null;
