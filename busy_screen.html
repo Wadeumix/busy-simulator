@@ -446,13 +446,11 @@ function showBonusPopup(){
 // ---- ルーレット(独立した別ウィンドウで開く) ----
 // 青が最も多くコマを占め、赤は全体の中でただ1コマだけ(スーパージャックポット)
 // =====================================================================
-const ROULETTE_WHEEL = [
-  "blue","blue","blue","blue","blue","blue","blue","blue","blue","blue",
-  "yellow","yellow","yellow","yellow","yellow",
-  "green","green",
-  "orange","orange",
-  "red",
-];
+// 各色の配分は割合(%)で管理し、合計が最大100%になるようにする
+// (青50% / 黄25% / 緑10% / オレンジ10% / 赤5% = 100%)
+const ROULETTE_PERCENTS = { blue: 50, yellow: 25, green: 10, orange: 10, red: 5 };
+const ROULETTE_WHEEL = Object.entries(ROULETTE_PERCENTS)
+  .flatMap(([color, pct]) => Array(pct).fill(color));
 const ROULETTE_COLORS = {
   blue:   { label: "queue +50",        sub: () => "通常キューが50件増加" },
   yellow: { label: "rush +100",        sub: () => "ラッシュキューが100件増加" },
@@ -593,19 +591,31 @@ function spinRouletteOnce(win, onDone){
   const targetIndex = randInt(0, segments.length - 1);
   const winningColor = segments[targetIndex];
 
-  // 左から右へ1コマずつハイライトが移動し、多めに周回しながら慣性で減速して当選コマに止まる
-  // 全体の所要時間は1分〜2分でランダムに決め、その時間をステップ間隔に配分する
-  const TOTAL_SPIN_MS = randInt(60000, 120000);
-  const LOOPS = randInt(12, 20);
+  // 左から右へ1コマずつハイライトが移動し、周回しながら当選コマに止まる
+  // 全体の所要時間は30秒〜2分でランダムに決め、その時間をステップ間隔に配分する
+  const TOTAL_SPIN_MS = randInt(30000, 120000);
+  const LOOPS = randInt(2, 4);
   const totalSteps = LOOPS * segments.length + targetIndex + 1;
 
-  // 進捗が進むほど重みを大きくする(3乗カーブ)ことで、後半ほど間隔が長くなる=減速して見える
-  const weights = [];
-  for(let i = 0; i < totalSteps; i++){
-    weights.push(Math.pow((i + 1) / totalSteps, 3));
+  // 最後の1/15区間に入るまでは等速(高速)で進み、そこから減速して当選コマにぴったり止まる
+  const DECEL_FRACTION = 1 / 15;
+  const decelStartStep = Math.max(1, Math.floor(totalSteps * (1 - DECEL_FRACTION)));
+  const fastSteps = decelStartStep;
+  const decelSteps = totalSteps - decelStartStep;
+
+  const FAST_DELAY_MS = 15;
+  const fastTotal = fastSteps * FAST_DELAY_MS;
+  const remainingTime = Math.max(0, TOTAL_SPIN_MS - fastTotal);
+
+  const decelWeights = [];
+  for(let i = 0; i < decelSteps; i++){
+    decelWeights.push(Math.pow((i + 1) / decelSteps, 3));
   }
-  const weightSum = weights.reduce((a, b) => a + b, 0);
-  const delays = weights.map(w => (w / weightSum) * TOTAL_SPIN_MS);
+  const decelWeightSum = decelWeights.reduce((a, b) => a + b, 0) || 1;
+
+  const delays = [];
+  for(let i = 0; i < fastSteps; i++) delays.push(FAST_DELAY_MS);
+  for(let i = 0; i < decelSteps; i++) delays.push((decelWeights[i] / decelWeightSum) * remainingTime);
 
   let step = 0;
   let prevTile = null;
