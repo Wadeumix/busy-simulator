@@ -325,6 +325,7 @@ function triggerCriticalEvent(duration){
   state.fastSpinsRemaining += 10;
   saveState();
   renderQueue();
+  showRouletteWaiting();
   if(!isProcessing) tick();
 
   setTimeout(() => {
@@ -444,7 +445,7 @@ const BONUS_TABLE = [
   { weight: 6,  label: "throughput ×2 (short)",      sub: "次の5ログ分の獲得revが2倍",         apply: () => { state.activeBuff = { remaining: 5,  multiplier: 2 }; saveState(); } },
   { weight: 3,  label: "throughput ×2 (extended)",   sub: "次の20ログ分の獲得revが2倍",        apply: () => { state.activeBuff = { remaining: 20, multiplier: 2 }; saveState(); } },
   // ルーレットは専用キュー(roulettePending)に積む。ラッシュ終了後、通常キューより先に消化される
-  { weight: 2,  label: "manual review required",     sub: "ルーレットが1件キューに追加",       apply: () => { state.roulettePending += 1; renderQueue(); } },
+  { weight: 2,  label: "manual review required",     sub: "ルーレットが1件キューに追加",       apply: () => { state.roulettePending += 1; renderQueue(); showRouletteWaiting(); } },
   { weight: 1,  label: "critical patch escalation",  sub: "次の20ログ分の獲得revが20倍 + 無償ログ100件が割り込み", apply: () => { state.activeBuff = { remaining: 20, multiplier: 20 }; saveState(); injectBarrage(100); } },
 ];
 const BONUS_TOTAL_WEIGHT = BONUS_TABLE.reduce((a, b) => a + b.weight, 0);
@@ -601,6 +602,22 @@ function ensureRouletteWindow(){
     rouletteWin = buildRouletteWindow();
   }
   return rouletteWin;
+}
+
+// ラッシュ処理中などでまだスピンを開始できない間も、ルーレットが積まれた時点で
+// 先にウィンドウだけ開いてスタック数と待機中である旨を表示しておく
+function showRouletteWaiting(){
+  if(state.roulettePending <= 0) return;
+  if(rouletteActive) return; // 既にスピン中ならそちらの表示に任せる
+  const win = ensureRouletteWindow();
+  if(!win) return; // ポップアップがブロックされている場合は何もしない
+  const doc = win.document;
+  const counterEl = doc.getElementById("counter");
+  const stackEl = doc.getElementById("stack");
+  const resultBox = doc.getElementById("resultBox");
+  if(resultBox) resultBox.classList.remove("show");
+  if(counterEl) counterEl.textContent = "queued — waiting for current workload to clear…";
+  if(stackEl) stackEl.textContent = `stack: +${state.roulettePending}`;
 }
 
 function spinRouletteOnce(win, onDone){
@@ -796,6 +813,7 @@ function handleCommand(raw){
     const n = Math.max(1, parseInt(arg, 10) || 1);
     state.roulettePending += n;
     renderQueue();
+    showRouletteWaiting();
     printSystemLine(`debug: queued ${n} roulette slot(s)`);
     if(!isProcessing) tick();
   } else if(cmd === "debug" && sub === "jackpot"){
