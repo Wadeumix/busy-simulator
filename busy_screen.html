@@ -611,7 +611,7 @@ function spinRouletteOnce(win, onDone){
 
   const decelWeights = [];
   for(let i = 0; i < decelSteps; i++){
-    decelWeights.push(Math.pow((i + 1) / decelSteps, 3));
+    decelWeights.push(Math.pow((i + 1) / decelSteps, 4));
   }
   const decelWeightSum = decelWeights.reduce((a, b) => a + b, 0) || 1;
 
