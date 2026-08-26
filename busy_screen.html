@@ -483,6 +483,7 @@ function applyRouletteColor(color){
 }
 
 let rouletteWin = null;
+let rouletteActive = false; // trueの間はtick()が新しいルーレットセッションを開始しない
 
 function shuffled(arr){
   const a = arr.slice();
@@ -638,7 +639,11 @@ function spinRouletteOnce(win, onDone){
 
 function startRouletteSequence(){
   // ルーレットはメインのtickループとは独立して進行する(呼び出し元で待たない)。
-  // 効果適用側(applyRouletteColor)が、メインループが止まっていれば起こす
+  // 効果適用側(applyRouletteColor)が、メインループが止まっていれば起こす。
+  // rouletteActiveが立っている間は、tick()側が新たなセッションを起動しないようにする
+  // (このセッション内で溜まった追加分のroulettePendingはrunNext()が1つずつ順番に消化する)
+  rouletteActive = true;
+
   const win = ensureRouletteWindow();
   if(!win){
     // ポップアップがブロックされた場合は、演出なしで抽選だけ実行してキューを消化する
@@ -649,6 +654,7 @@ function startRouletteSequence(){
       applyRouletteColor(pick(ROULETTE_WHEEL));
     }
     renderQueue();
+    rouletteActive = false;
     return;
   }
 
@@ -660,6 +666,7 @@ function startRouletteSequence(){
         applyRouletteColor(pick(ROULETTE_WHEEL));
       }
       renderQueue();
+      rouletteActive = false;
       return;
     }
     const stackEl = win.document.getElementById("stack");
@@ -675,6 +682,7 @@ function startRouletteSequence(){
         win.setTimeout(() => {
           if(!rouletteWindowClosedOrMissing()) win.close();
           rouletteWin = null;
+          rouletteActive = false;
         }, 600);
       }
     });
@@ -831,8 +839,10 @@ function tick(){
   }
 
   // ラッシュが空になった時点で、ルーレット枠(roulettePending)を通常キューより優先して消化する。
-  // ルーレット自体は別ウィンドウで独立して(1〜2分かけて)進行し、メインのtickループは止めない
-  if(state.priorityPulls <= 0 && state.roulettePending > 0){
+  // ルーレット自体は別ウィンドウで独立して(1〜2分かけて)進行し、メインのtickループは止めない。
+  // ただし既に別のルーレットが進行中(rouletteActive)なら、新規セッションは開始しない
+  // (スタックされた分は現在進行中のセッション自身が1つずつ順番に消化する)
+  if(state.priorityPulls <= 0 && state.roulettePending > 0 && !rouletteActive){
     const div = document.createElement("div");
     div.className = "log-line roulette-line";
     div.textContent = "◆ diagnostic roulette scheduled — opening secondary console";
@@ -845,6 +855,13 @@ function tick(){
     statusText.textContent = "processing…";
     animateBar(PRIORITY_PULL_MS);
     setTimeout(tick, PRIORITY_PULL_MS);
+    return;
+  }
+
+  // ルーレット進行中で、他に消化できるキューが何もなければ一旦アイドルに戻る
+  // (ルーレットが決着すればapplyRouletteColor側がtick()を起こす)
+  if(state.priorityPulls <= 0 && state.pendingPulls <= 0){
+    goIdle();
     return;
   }
 
