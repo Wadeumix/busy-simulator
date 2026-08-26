@@ -83,6 +83,25 @@
   }
   #cmdInput:focus{ width:220px; cursor:text; }
 
+  /* ---- 10ログ消化ごとのボーナス抽選ポップアップ ---- */
+  #bonusOverlay{
+    position:fixed; inset:0; background:rgba(1,4,9,.6);
+    display:flex; align-items:center; justify-content:center;
+    opacity:0; pointer-events:none; transition:opacity .25s ease;
+    z-index:100;
+  }
+  #bonusOverlay.show{ opacity:1; pointer-events:auto; }
+  #bonusBox{
+    background:var(--bg); border:1px solid var(--accent); border-radius:10px;
+    padding:22px 28px; min-width:260px; text-align:center;
+    box-shadow:0 12px 40px rgba(0,0,0,.6);
+    transform:scale(.9); transition:transform .25s ease;
+  }
+  #bonusOverlay.show #bonusBox{ transform:scale(1); }
+  #bonusBox .bonus-title{ font-size:12px; color:var(--dim); letter-spacing:.08em; }
+  #bonusBox .bonus-result{ font-size:16px; color:var(--accent); font-weight:bold; margin:10px 0 4px; }
+  #bonusBox .bonus-sub{ font-size:12px; color:var(--dim); }
+
   /* ---- スキン(見た目)プリセット ---- */
   body.skin-neon .bar-inner{ background:linear-gradient(90deg,#d63bff,#39ffe0) !important; }
   body.skin-neon{ font-family:"Courier New",monospace; }
@@ -110,6 +129,14 @@
     </div>
   </div>
 
+  <div id="bonusOverlay">
+    <div id="bonusBox">
+      <div class="bonus-title">build-pipeline bonus draw</div>
+      <div class="bonus-result" id="bonusResult"></div>
+      <div class="bonus-sub" id="bonusSub"></div>
+    </div>
+  </div>
+
 <script>
 const logEl = document.getElementById("log");
 const bar = document.getElementById("bar");
@@ -120,6 +147,9 @@ const queueText = document.getElementById("queueText");
 const coinText = document.getElementById("coinText");
 const cmdInput = document.getElementById("cmdInput");
 const clock = document.getElementById("clock");
+const bonusOverlay = document.getElementById("bonusOverlay");
+const bonusResult = document.getElementById("bonusResult");
+const bonusSub = document.getElementById("bonusSub");
 
 function updateClock(){
   clock.textContent = new Date().toLocaleTimeString();
@@ -346,6 +376,42 @@ document.addEventListener("click", (e) => {
   renderQueue();
 });
 
+// ---- 10ログ消化ごとのボーナス抽選 ----
+// 上から下へ確率が減っていく。ログキュー増加グループが初期値80%、倍率グループが20%
+const BONUS_TABLE = [
+  { weight: 45, label: "queue +5",  sub: "ログキューが5件増加",            apply: () => { pendingPulls += 5;  renderQueue(); } },
+  { weight: 25, label: "queue +10", sub: "ログキューが10件増加",           apply: () => { pendingPulls += 10; renderQueue(); } },
+  { weight: 10, label: "queue +20", sub: "ログキューが20件増加",           apply: () => { pendingPulls += 20; renderQueue(); } },
+  { weight: 9,  label: "×2 boost",  sub: "次の5ログ分の獲得revが2倍",       apply: () => { activeBuff = { remaining: 5,  multiplier: 2 }; } },
+  { weight: 6,  label: "×2 boost+", sub: "次の20ログ分の獲得revが2倍",      apply: () => { activeBuff = { remaining: 20, multiplier: 2 }; } },
+  { weight: 5,  label: "×5 JACKPOT",sub: "次の20ログ分の獲得revが5倍",      apply: () => { activeBuff = { remaining: 20, multiplier: 5 }; } },
+];
+const BONUS_TOTAL_WEIGHT = BONUS_TABLE.reduce((a, b) => a + b.weight, 0);
+let activeBuff = null; // { remaining, multiplier }
+let resolvedSincePopup = 0;
+let bonusHideTimer = null;
+
+function pickBonus(){
+  let r = Math.random() * BONUS_TOTAL_WEIGHT;
+  for(const b of BONUS_TABLE){
+    r -= b.weight;
+    if(r <= 0) return b;
+  }
+  return BONUS_TABLE[BONUS_TABLE.length - 1];
+}
+
+function showBonusPopup(){
+  const bonus = pickBonus();
+  bonus.apply();
+  bonusResult.textContent = bonus.label;
+  bonusSub.textContent = bonus.sub;
+  bonusOverlay.classList.add("show");
+  if(bonusHideTimer) clearTimeout(bonusHideTimer);
+  bonusHideTimer = setTimeout(() => {
+    bonusOverlay.classList.remove("show");
+  }, 2600);
+}
+
 // ---- アップグレードのコスト計算 ----
 function upgradeCost(level){
   return Math.round(20 * Math.pow(1.6, level));
@@ -452,7 +518,20 @@ function tick(){
   if(pendingPulls > 0){
     pendingPulls--;
     renderQueue();
-    addCoins(REWARD_TABLE[seconds] || 1);
+
+    let reward = REWARD_TABLE[seconds] || 1;
+    if(activeBuff && activeBuff.remaining > 0){
+      reward *= activeBuff.multiplier;
+      activeBuff.remaining--;
+      if(activeBuff.remaining <= 0) activeBuff = null;
+    }
+    addCoins(reward);
+
+    resolvedSincePopup++;
+    if(resolvedSincePopup >= 10){
+      resolvedSincePopup = 0;
+      showBonusPopup();
+    }
   }
 
   if(seconds === 20){
