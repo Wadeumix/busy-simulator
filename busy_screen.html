@@ -707,7 +707,20 @@ function handleCommand(raw){
   } else if(cmd === "status"){
     printSystemLine(`config dump — rev.${state.coins}, income.L${state.incomeLevel}, odds.L${state.oddsLevel}, fx.L${state.fxLevel}, theme=${state.skinId}`);
   } else if(cmd === "help"){
-    printSystemLine(`available directives: buy income | buy odds | buy fx | buy skin <default|neon|amber> | status`);
+    printSystemLine(`available directives: buy income | buy odds | buy fx | buy skin <default|neon|amber> | status | debug roulette [n] | debug jackpot | debug bonus`);
+  } else if(cmd === "debug" && sub === "roulette"){
+    const n = Math.max(1, parseInt(arg, 10) || 1);
+    state.roulettePending += n;
+    renderQueue();
+    printSystemLine(`debug: queued ${n} roulette slot(s)`);
+    if(!isProcessing) tick();
+  } else if(cmd === "debug" && sub === "jackpot"){
+    state.activeBuff = { remaining: 20, multiplier: 20 };
+    saveState();
+    injectBarrage(100);
+    printSystemLine(`debug: forced ×20 JACKPOT barrage`);
+  } else if(cmd === "debug" && sub === "bonus"){
+    showBonusPopup();
   } else {
     printSystemLine(`unrecognized directive "${cmd}" — check syntax`);
   }
