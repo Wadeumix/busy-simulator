@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>System Process</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9;
+    --accent:#58a6ff; --green:#3fb950; --dim:#8b949e;
+  }
+  *{box-sizing:border-box;}
+  html,body{ height:100%; }
+  body{
+    margin:0; background:var(--panel); color:var(--text);
+    font-family:"SF Mono","Consolas","Menlo",monospace;
+    display:flex; flex-direction:column;
+    cursor:wait;
+  }
+  .topbar{
+    background:#21262d; padding:10px 14px; display:flex; align-items:center; gap:8px;
+    border-bottom:1px solid var(--border); font-size:13px; color:var(--dim);
+    -webkit-app-region:drag;
+  }
+  .body{
+    padding:20px 22px; font-size:13.5px; line-height:1.65;
+    flex:1; min-height:0; display:flex; flex-direction:column;
+  }
+  .log-area{ flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; justify-content:flex-end; }
+  .log-line{ opacity:0; animation:fadeIn .25s forwards; white-space:pre-wrap; }
+  .ok{color:var(--green);}
+  .tag{color:var(--accent);}
+  .dimmed{color:var(--dim);}
+  @keyframes fadeIn{ to{opacity:1;} }
+  .progress-wrap{ margin-top:16px; flex-shrink:0; }
+  .bar-outer{
+    width:100%; height:8px; background:#010409; border-radius:4px; overflow:hidden;
+    border:1px solid var(--border);
+  }
+  .bar-inner{
+    height:100%; width:0%; background:linear-gradient(90deg,#1f6feb,#58a6ff);
+    transition:width .4s ease;
+  }
+  .status-row{
+    display:flex; justify-content:space-between; margin-top:8px;
+    font-size:12px; color:var(--dim);
+  }
+  .cursor{ display:inline-block; width:8px; height:14px; background:var(--accent);
+    animation:blink 1s step-end infinite; vertical-align:text-bottom; margin-left:2px;}
+  @keyframes blink{ 50%{opacity:0;} }
+  .clock{ font-size:12px; color:var(--dim); }
+
+  /* ---- 20秒レア演出 ---- */
+  body.critical{ animation:critical-flash 1s ease-in-out infinite; }
+  @keyframes critical-flash{
+    0%, 100%{ box-shadow:inset 0 0 0 0 rgba(248,81,73,0); }
+    50%{ box-shadow:inset 0 0 60px 6px rgba(248,81,73,.55); }
+  }
+  body.critical .topbar{ background:#3a1414; border-bottom-color:#f85149; }
+  body.critical .bar-inner{
+    background:linear-gradient(90deg,#f85149,#ff7b72) !important;
+  }
+  .critical-line{
+    color:#f85149 !important; font-weight:bold;
+    animation:critical-text-flash .5s ease-in-out infinite;
+  }
+  @keyframes critical-text-flash{ 50%{ opacity:.4; } }
+  body.critical .log-area{ animation:critical-shake .25s linear infinite; }
+  @keyframes critical-shake{
+    0%{ transform:translate(0,0); }
+    20%{ transform:translate(-1px,1px); }
+    40%{ transform:translate(1px,-1px); }
+    60%{ transform:translate(-1px,-1px); }
+    80%{ transform:translate(1px,1px); }
+    100%{ transform:translate(0,0); }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <span>build-pipeline — production</span>
+    <span style="margin-left:auto" class="clock" id="clock"></span>
+  </div>
+  <div class="body">
+    <div class="log-area"><div id="log"></div></div>
+    <div class="progress-wrap">
+      <div class="bar-outer"><div class="bar-inner" id="bar"></div></div>
+      <div class="status-row">
+        <span id="pct">0%</span>
+        <span id="statusText">initializing…</span>
+        <span id="durText" class="dimmed"></span>
+      </div>
+    </div>
+  </div>
+
+<script>
+const logEl = document.getElementById("log");
+const bar = document.getElementById("bar");
+const pct = document.getElementById("pct");
+const statusText = document.getElementById("statusText");
+const durText = document.getElementById("durText");
+const clock = document.getElementById("clock");
+
+function updateClock(){
+  clock.textContent = new Date().toLocaleTimeString();
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ---- ランダムログ生成用の部品 ----
+const modules = ["auth","billing","catalog","search-index","user-profile","notification",
+  "media-pipeline","recommendation","cache-layer","analytics","payments","inventory",
+  "session-store","image-cdn","report-engine","queue-worker","ml-scoring","geo-service"];
+const hosts = ["prod-worker-01","prod-worker-04","prod-worker-07","staging-node-02",
+  "cache-node-03","db-replica-05","worker-pool-a","worker-pool-b"];
+const actions = [
+  m => `scanning module ${m} for stale references`,
+  m => `rebuilding index for ${m}`,
+  m => `validating schema on ${m}`,
+  m => `compiling ${m} bundle`,
+  m => `running unit tests for ${m}`,
+  m => `syncing ${m} state with remote store`,
+  m => `applying migration to ${m}`,
+  m => `warming cache for ${m}`,
+  m => `resolving dependency graph for ${m}`,
+  m => `optimizing queries in ${m}`,
+  m => `checking integrity of ${m} records`,
+  m => `pruning dead entries from ${m}`,
+  m => `re-encoding assets for ${m}`,
+  m => `analyzing ${m} performance metrics`,
+  m => `deploying patch to ${m}`,
+];
+function hexId(len){
+  const chars = "0123456789abcdef";
+  let s = "";
+  for(let i=0;i<len;i++) s += chars[Math.floor(Math.random()*chars.length)];
+  return s;
+}
+function randInt(a,b){ return Math.floor(a + Math.random()*(b-a+1)); }
+function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+
+function generateLogEvent(){
+  const m = pick(modules);
+  const actionText = pick(actions)(m);
+  const roll = Math.random();
+  if(roll < 0.68){
+    return {prefix:"> ", text:`${actionText} [${hexId(6)}]`, cls:"dimmed"};
+  } else if(roll < 0.93){
+    const n = randInt(3, 480);
+    return {prefix:"✓ ", text:`${actionText} — done (${n} records, host: ${pick(hosts)})`, cls:"ok"};
+  } else {
+    return {prefix:"i ", text:`retrying ${m} — transient timeout, attempt ${randInt(1,3)}`, cls:"dimmed"};
+  }
+}
+
+// ---- 全体の完了時刻: 約2時間後 ----
+const TOTAL_DURATION_MS = 2 * 60 * 60 * 1000;
+const startTime = performance.now();
+
+// 各ログ行の表示時間(秒) — 二段階抽選
+// 第1段階: 「1〜4秒」というひとまとまりの候補 vs 5秒,6秒,...,20秒 という個別の候補、から1つを選ぶ
+//   → 「1〜4秒」の枠自体が60%、10秒以降は各1%以下、15秒=0.1%以下、20秒=0.01%以下
+// 第2段階: 第1段階で「1〜4秒」が当たった場合のみ、その中から1・2・3・4秒を均等抽選
+const BUCKETS = [
+  { seconds: null, weight: 60.0 },   // "1〜4秒" のまとまり
+  { seconds: 5,  weight: 10.50 },
+  { seconds: 6,  weight: 8.70 },
+  { seconds: 7,  weight: 7.00 },
+  { seconds: 8,  weight: 5.60 },
+  { seconds: 9,  weight: 4.52 },
+  { seconds: 10, weight: 1.00 },
+  { seconds: 11, weight: 0.90 },
+  { seconds: 12, weight: 0.70 },
+  { seconds: 13, weight: 0.50 },
+  { seconds: 14, weight: 0.30 },
+  { seconds: 15, weight: 0.10 },
+  { seconds: 16, weight: 0.07 },
+  { seconds: 17, weight: 0.05 },
+  { seconds: 18, weight: 0.03 },
+  { seconds: 19, weight: 0.02 },
+  { seconds: 20, weight: 0.01 },
+];
+const BUCKET_TOTAL_WEIGHT = BUCKETS.reduce((a, b) => a + b.weight, 0);
+
+function randLineDurationMs(){
+  let r = Math.random() * BUCKET_TOTAL_WEIGHT;
+  let chosen = BUCKETS[BUCKETS.length - 1];
+  for(const b of BUCKETS){
+    r -= b.weight;
+    if(r <= 0){ chosen = b; break; }
+  }
+  // 「1〜4秒」の枠が当たった場合は、その中でさらに均等抽選
+  const seconds = chosen.seconds !== null ? chosen.seconds : randInt(1, 4);
+  return seconds * 1000;
+}
+
+function appendLogLine(){
+  const ev = generateLogEvent();
+  const div = document.createElement("div");
+  div.className = "log-line";
+  div.innerHTML = `<span class="${ev.cls}">${ev.prefix}</span>${ev.text}`;
+  logEl.appendChild(div);
+
+  // ログが際限なく積み上がらないよう、一定数を超えたら古い行を削除
+  while(logEl.children.length > 200){
+    logEl.removeChild(logEl.firstChild);
+  }
+}
+
+function animateBar(duration){
+  durText.textContent = `(${(duration/1000).toFixed(duration % 1000 === 0 ? 0 : 1)}s)`;
+  pct.textContent = "0%";
+  bar.style.transition = "none";
+  bar.style.width = "0%";
+  // reflow を挟んでからトランジションを有効化
+  void bar.offsetWidth;
+  bar.style.transition = `width ${duration}ms linear`;
+  bar.style.width = "100%";
+
+  const pctStart = performance.now();
+  const pctTimer = setInterval(() => {
+    const p = Math.min(100, Math.round(((performance.now() - pctStart) / duration) * 100));
+    pct.textContent = p + "%";
+    if(p >= 100) clearInterval(pctTimer);
+  }, 50);
+}
+
+// ---- 20秒(0.01%)を引いた時だけの特別演出 ----
+function triggerCriticalEvent(duration){
+  const div = document.createElement("div");
+  div.className = "log-line critical-line";
+  div.textContent = "⚠ anomaly detected — deep scan in progress, do not close window";
+  logEl.appendChild(div);
+
+  document.body.classList.add("critical");
+  statusText.textContent = "ANOMALY DETECTED";
+  animateBar(duration);
+
+  setTimeout(() => {
+    document.body.classList.remove("critical");
+  }, duration);
+}
+
+function tick(){
+  const elapsed = performance.now() - startTime;
+
+  if(elapsed >= TOTAL_DURATION_MS){
+    const div = document.createElement("div");
+    div.className = "log-line ok";
+    div.innerHTML = "✓ pipeline complete — all stages finished successfully";
+    logEl.appendChild(div);
+    bar.style.transition = "none";
+    bar.style.width = "100%";
+    pct.textContent = "100%";
+    statusText.textContent = "完了";
+    return;
+  }
+
+  appendLogLine();
+
+  // このログ行の「処理時間」としてバーを0→100%までアニメーション
+  const duration = randLineDurationMs();
+
+  if(duration === 20000){
+    triggerCriticalEvent(duration);
+  } else {
+    statusText.textContent = "processing…";
+    animateBar(duration);
+  }
+
+  setTimeout(tick, duration);
+}
+
+// ---- 起動直後のバースト演出: 最初の約5秒でウィンドウの半分以上をログで埋める ----
+const BURST_DURATION_MS = 5000;
+const burstStart = performance.now();
+statusText.textContent = "initializing…";
+
+function burstTick(){
+  const burstElapsed = performance.now() - burstStart;
+  if(burstElapsed >= BURST_DURATION_MS){
+    setTimeout(tick, 200);
+    return;
+  }
+  appendLogLine();
+  // バーも高速でチカチカ処理してる感を出す
+  const fastDuration = randInt(80, 220);
+  animateBar(fastDuration);
+  statusText.textContent = "scanning…";
+
+  setTimeout(burstTick, fastDuration);
+}
+setTimeout(burstTick, 150);
+</script>
+</body>
+</html>
