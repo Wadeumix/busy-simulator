@@ -448,9 +448,11 @@ function showBonusPopup(){
 // =====================================================================
 // 各色の配分は割合(%)で管理し、合計が最大100%になるようにする
 // (青50% / 黄25% / 緑10% / オレンジ10% / 赤5% = 100%)
+// 見た目のコマ数は確率の分解能とは分けて、視認性の良い20コマ分で表示する
 const ROULETTE_PERCENTS = { blue: 50, yellow: 25, green: 10, orange: 10, red: 5 };
+const ROULETTE_TILE_COUNT = 20;
 const ROULETTE_WHEEL = Object.entries(ROULETTE_PERCENTS)
-  .flatMap(([color, pct]) => Array(pct).fill(color));
+  .flatMap(([color, pct]) => Array(Math.round(pct / 100 * ROULETTE_TILE_COUNT)).fill(color));
 const ROULETTE_COLORS = {
   blue:   { label: "queue +50",        sub: () => "通常キューが50件増加" },
   yellow: { label: "rush +100",        sub: () => "ラッシュキューが100件増加" },
@@ -594,7 +596,7 @@ function spinRouletteOnce(win, onDone){
   // 左から右へ1コマずつハイライトが移動し、周回しながら当選コマに止まる
   // 全体の所要時間は30秒〜2分でランダムに決め、その時間をステップ間隔に配分する
   const TOTAL_SPIN_MS = randInt(30000, 120000);
-  const LOOPS = randInt(2, 4);
+  const LOOPS = randInt(12, 20);
   const totalSteps = LOOPS * segments.length + targetIndex + 1;
 
   // 最後の1/15区間に入るまでは等速(高速)で進み、そこから減速して当選コマにぴったり止まる
@@ -626,7 +628,8 @@ function spinRouletteOnce(win, onDone){
     tiles[idx].classList.add("active");
     prevTile = tiles[idx];
     step++;
-    counterEl.textContent = `resolving candidate patch — segment ${Math.min(step, totalSteps)}/${totalSteps}`;
+    const pct = Math.min(100, Math.round((step / totalSteps) * 100));
+    counterEl.textContent = `resolving candidate patch — ${pct}%`;
 
     if(step >= totalSteps){
       applyRouletteColor(winningColor);
