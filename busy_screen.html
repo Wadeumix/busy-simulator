@@ -574,6 +574,12 @@ function tick(){
     renderQueue();
     addCoins(PRIORITY_PULL_REWARD);
 
+    resolvedSincePopup++;
+    if(resolvedSincePopup >= 10){
+      resolvedSincePopup = 0;
+      showBonusPopup();
+    }
+
     statusText.textContent = "processing… (rush)";
     animateBar(PRIORITY_PULL_MS);
     setTimeout(tick, PRIORITY_PULL_MS);
