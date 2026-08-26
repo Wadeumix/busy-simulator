@@ -486,7 +486,7 @@ function buildRouletteWindow(){
   const w = 360, h = 300;
   const left = Math.round((screen.width - w) / 2);
   const top = Math.round((screen.height - h) / 2);
-  const win = window.open("", "rouletteWin",
+  const win = window.open("about:blank", "rouletteWin",
     `width=${w},height=${h},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=no`);
   if(!win) return null;
 
