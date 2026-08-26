@@ -64,15 +64,30 @@
     animation:critical-text-flash .5s ease-in-out infinite;
   }
   @keyframes critical-text-flash{ 50%{ opacity:.4; } }
+  :root{ --fx-shake:1; }
   body.critical .log-area{ animation:critical-shake .25s linear infinite; }
   @keyframes critical-shake{
     0%{ transform:translate(0,0); }
-    20%{ transform:translate(-1px,1px); }
-    40%{ transform:translate(1px,-1px); }
-    60%{ transform:translate(-1px,-1px); }
-    80%{ transform:translate(1px,1px); }
+    20%{ transform:translate(calc(var(--fx-shake) * -1px),calc(var(--fx-shake) * 1px)); }
+    40%{ transform:translate(calc(var(--fx-shake) * 1px),calc(var(--fx-shake) * -1px)); }
+    60%{ transform:translate(calc(var(--fx-shake) * -1px),calc(var(--fx-shake) * -1px)); }
+    80%{ transform:translate(calc(var(--fx-shake) * 1px),calc(var(--fx-shake) * 1px)); }
     100%{ transform:translate(0,0); }
   }
+
+  /* ---- ステータス行に紛れ込ませたコマンド入力欄 ---- */
+  #cmdInput{
+    background:transparent; border:none; outline:none; padding:0;
+    font-family:inherit; font-size:12px; color:var(--dim);
+    width:64px; caret-color:var(--dim);
+  }
+  #cmdInput:focus{ width:220px; }
+
+  /* ---- スキン(見た目)プリセット ---- */
+  body.skin-neon .bar-inner{ background:linear-gradient(90deg,#d63bff,#39ffe0) !important; }
+  body.skin-neon{ font-family:"Courier New",monospace; }
+  body.skin-amber .bar-inner{ background:linear-gradient(90deg,#b45309,#fbbf24) !important; }
+  body.skin-amber{ font-family:Georgia,"Times New Roman",serif; }
 </style>
 </head>
 <body>
@@ -88,6 +103,8 @@
         <span id="pct">0%</span>
         <span id="statusText">initializing…</span>
         <span id="durText" class="dimmed"></span>
+        <span id="coinText" class="dimmed"></span>
+        <input id="cmdInput" type="text" autocomplete="off" spellcheck="false">
       </div>
     </div>
   </div>
@@ -98,6 +115,8 @@ const bar = document.getElementById("bar");
 const pct = document.getElementById("pct");
 const statusText = document.getElementById("statusText");
 const durText = document.getElementById("durText");
+const coinText = document.getElementById("coinText");
+const cmdInput = document.getElementById("cmdInput");
 const clock = document.getElementById("clock");
 
 function updateClock(){
@@ -179,19 +198,44 @@ const BUCKETS = [
   { seconds: 19, weight: 0.02 },
   { seconds: 20, weight: 0.01 },
 ];
-const BUCKET_TOTAL_WEIGHT = BUCKETS.reduce((a, b) => a + b.weight, 0);
+const BASE_BUCKET_WEIGHTS = BUCKETS.map(b => b.weight);
 
-function randLineDurationMs(){
-  let r = Math.random() * BUCKET_TOTAL_WEIGHT;
+// オッズアップグレードで購入した分だけ、レア枠(10秒以降)の重みを底上げする
+// (見た目の処理時間の分布も一緒に変わる仕様は意図した挙動)
+function applyOddsLevel(level){
+  BUCKETS.forEach((b, i) => {
+    if(b.seconds !== null && b.seconds >= 10){
+      // レベルごとにレア枠の重みを+15%ずつ強化(最大10レベルまで)
+      const boost = 1 + Math.min(level, 10) * 0.15;
+      b.weight = BASE_BUCKET_WEIGHTS[i] * boost;
+    }
+  });
+}
+
+function pickBucket(){
+  const total = BUCKETS.reduce((a, b) => a + b.weight, 0);
+  let r = Math.random() * total;
   let chosen = BUCKETS[BUCKETS.length - 1];
   for(const b of BUCKETS){
     r -= b.weight;
     if(r <= 0){ chosen = b; break; }
   }
   // 「1〜4秒」の枠が当たった場合は、その中でさらに均等抽選
-  const seconds = chosen.seconds !== null ? chosen.seconds : randInt(1, 4);
-  return seconds * 1000;
+  return chosen.seconds !== null ? chosen.seconds : randInt(1, 4);
 }
+
+function randLineDurationMs(){
+  return pickBucket() * 1000;
+}
+
+// ---- 秒数(レア度) → コイン報酬 の対応テーブル ----
+const REWARD_TABLE = {
+  1:1, 2:1, 3:1, 4:1,
+  5:2, 6:3, 7:4, 8:5, 9:6,
+  10:10, 11:16, 12:24, 13:35, 14:50,
+  15:200, 16:340, 17:480, 18:620, 19:800,
+  20:5000,
+};
 
 function appendLogLine(){
   const ev = generateLogEvent();
@@ -231,6 +275,7 @@ function triggerCriticalEvent(duration){
   div.textContent = "⚠ anomaly detected — deep scan in progress, do not close window";
   logEl.appendChild(div);
 
+  document.body.style.setProperty("--fx-shake", String(1 + state.fxLevel * 0.6));
   document.body.classList.add("critical");
   statusText.textContent = "ANOMALY DETECTED";
   animateBar(duration);
@@ -239,6 +284,152 @@ function triggerCriticalEvent(duration){
     document.body.classList.remove("critical");
   }, duration);
 }
+
+// =====================================================================
+// ---- 隠しコインプッシャー要素 ----
+// 見た目は通常のログ/ステータス画面のまま、裏側でアイドルゲームの状態を管理する
+// =====================================================================
+const STATE_KEY = "busySimState";
+const DEFAULT_STATE = { coins: 0, incomeLevel: 0, oddsLevel: 0, skinId: "default", fxLevel: 0 };
+
+function loadState(){
+  try{
+    const raw = localStorage.getItem(STATE_KEY);
+    if(!raw) return { ...DEFAULT_STATE };
+    return { ...DEFAULT_STATE, ...JSON.parse(raw) };
+  } catch(e){
+    return { ...DEFAULT_STATE };
+  }
+}
+function saveState(){
+  try{ localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch(e){}
+}
+
+const state = loadState();
+applyOddsLevel(state.oddsLevel);
+applySkin(state.skinId);
+
+function renderCoins(){
+  coinText.textContent = `rev.${state.coins}`;
+}
+renderCoins();
+
+function addCoins(n){
+  state.coins += n;
+  renderCoins();
+  saveState();
+}
+
+function applySkin(skinId){
+  document.body.classList.remove("skin-neon", "skin-amber");
+  if(skinId === "neon") document.body.classList.add("skin-neon");
+  if(skinId === "amber") document.body.classList.add("skin-amber");
+}
+
+// ---- 放置による自動収入 ----
+const BASE_INCOME_INTERVAL_MS = 10000;
+function passiveIncomeTick(){
+  const interval = Math.max(2000, BASE_INCOME_INTERVAL_MS * Math.pow(0.9, state.incomeLevel));
+  addCoins(1);
+  setTimeout(passiveIncomeTick, interval);
+}
+setTimeout(passiveIncomeTick, BASE_INCOME_INTERVAL_MS);
+
+// ---- クリックによる手動プル ----
+function manualPull(){
+  const seconds = pickBucket();
+  const reward = REWARD_TABLE[seconds] || 1;
+  appendLogLine();
+  addCoins(reward);
+  if(seconds === 20){
+    triggerCriticalEvent(2500);
+  }
+}
+document.addEventListener("click", (e) => {
+  if(e.target === cmdInput) return;
+  manualPull();
+});
+
+// ---- アップグレードのコスト計算 ----
+function upgradeCost(level){
+  return Math.round(20 * Math.pow(1.6, level));
+}
+
+// ---- コマンド入力(見た目は地味なテキスト欄) ----
+function printSystemLine(text, cls){
+  const div = document.createElement("div");
+  div.className = "log-line" + (cls ? ` ${cls}` : "");
+  div.innerHTML = `<span class="dimmed">i </span>${text}`;
+  logEl.appendChild(div);
+  while(logEl.children.length > 200){
+    logEl.removeChild(logEl.firstChild);
+  }
+}
+
+function tryBuy(kind, arg){
+  if(kind === "income"){
+    const cost = upgradeCost(state.incomeLevel);
+    if(state.coins < cost){ printSystemLine(`config patch rejected — insufficient quota [${hexId(6)}]`); return; }
+    state.coins -= cost;
+    state.incomeLevel++;
+    saveState();
+    printSystemLine(`config patch applied (patch-id: ${hexId(6)}) — throughput tuning updated`, "ok");
+  } else if(kind === "odds"){
+    const cost = upgradeCost(state.oddsLevel);
+    if(state.coins < cost){ printSystemLine(`config patch rejected — insufficient quota [${hexId(6)}]`); return; }
+    state.coins -= cost;
+    state.oddsLevel++;
+    applyOddsLevel(state.oddsLevel);
+    saveState();
+    printSystemLine(`config patch applied (patch-id: ${hexId(6)}) — scheduler weights rebalanced`, "ok");
+  } else if(kind === "fx"){
+    const cost = upgradeCost(state.fxLevel);
+    if(state.coins < cost){ printSystemLine(`config patch rejected — insufficient quota [${hexId(6)}]`); return; }
+    state.coins -= cost;
+    state.fxLevel++;
+    saveState();
+    printSystemLine(`config patch applied (patch-id: ${hexId(6)}) — alert renderer updated`, "ok");
+  } else if(kind === "skin"){
+    const validSkins = ["default", "neon", "amber"];
+    if(!validSkins.includes(arg)){ printSystemLine(`config patch rejected — unknown profile "${arg}"`); return; }
+    const cost = 100;
+    if(state.coins < cost){ printSystemLine(`config patch rejected — insufficient quota [${hexId(6)}]`); return; }
+    state.coins -= cost;
+    state.skinId = arg;
+    applySkin(arg);
+    saveState();
+    printSystemLine(`config patch applied (patch-id: ${hexId(6)}) — theme profile switched to "${arg}"`, "ok");
+  } else {
+    printSystemLine(`unknown directive — no action taken`);
+  }
+  renderCoins();
+}
+
+function handleCommand(raw){
+  const parts = raw.trim().split(/\s+/).filter(Boolean);
+  if(parts.length === 0) return;
+  const [cmd, sub, arg] = parts;
+
+  if(cmd === "buy" && sub){
+    tryBuy(sub, arg);
+  } else if(cmd === "status"){
+    printSystemLine(`config dump — rev.${state.coins}, income.L${state.incomeLevel}, odds.L${state.oddsLevel}, fx.L${state.fxLevel}, theme=${state.skinId}`);
+  } else if(cmd === "help"){
+    printSystemLine(`available directives: buy income | buy odds | buy fx | buy skin <default|neon|amber> | status`);
+  } else {
+    printSystemLine(`unrecognized directive "${cmd}" — check syntax`);
+  }
+}
+
+cmdInput.addEventListener("keydown", (e) => {
+  e.stopPropagation();
+  if(e.key === "Enter"){
+    handleCommand(cmdInput.value);
+    cmdInput.value = "";
+    cmdInput.blur();
+  }
+});
+cmdInput.addEventListener("click", (e) => e.stopPropagation());
 
 function tick(){
   const elapsed = performance.now() - startTime;
