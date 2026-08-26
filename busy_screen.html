@@ -477,6 +477,9 @@ function applyRouletteColor(color){
     saveState();
     injectBarrage(5000);
   }
+  // ルーレットが決着した時点でメインのtickループが止まっていれば起こす
+  // (isProcessingが真の間は何もしない = 既存のループと衝突させない)
+  if(!isProcessing) tick();
 }
 
 let rouletteWin = null;
@@ -631,17 +634,18 @@ function spinRouletteOnce(win, onDone){
 }
 
 function startRouletteSequence(){
+  // ルーレットはメインのtickループとは独立して進行する(呼び出し元で待たない)。
+  // 効果適用側(applyRouletteColor)が、メインループが止まっていれば起こす
   const win = ensureRouletteWindow();
   if(!win){
     // ポップアップがブロックされた場合は、演出なしで抽選だけ実行してキューを消化する
-    // (tick()側でこの回の分は既にroulettePendingからデクリメント済み)
+    // (この回の分はtick()側で既にroulettePendingからデクリメント済み)
     applyRouletteColor(pick(ROULETTE_WHEEL));
     while(state.roulettePending > 0){
       state.roulettePending--;
       applyRouletteColor(pick(ROULETTE_WHEEL));
     }
     renderQueue();
-    tick();
     return;
   }
 
@@ -653,7 +657,6 @@ function startRouletteSequence(){
         applyRouletteColor(pick(ROULETTE_WHEEL));
       }
       renderQueue();
-      tick();
       return;
     }
     const stackEl = win.document.getElementById("stack");
@@ -669,7 +672,6 @@ function startRouletteSequence(){
         win.setTimeout(() => {
           if(!rouletteWindowClosedOrMissing()) win.close();
           rouletteWin = null;
-          tick();
         }, 600);
       }
     });
@@ -825,7 +827,8 @@ function tick(){
     return;
   }
 
-  // ラッシュが空になった時点で、ルーレット枠(roulettePending)を通常キューより優先して消化する
+  // ラッシュが空になった時点で、ルーレット枠(roulettePending)を通常キューより優先して消化する。
+  // ルーレット自体は別ウィンドウで独立して(1〜2分かけて)進行し、メインのtickループは止めない
   if(state.priorityPulls <= 0 && state.roulettePending > 0){
     const div = document.createElement("div");
     div.className = "log-line roulette-line";
@@ -834,9 +837,12 @@ function tick(){
 
     state.roulettePending--;
     renderQueue();
-    statusText.textContent = "roulette in progress…";
     startRouletteSequence();
-    return; // ルーレットの決着がつくまでtickループは一時停止する
+
+    statusText.textContent = "processing…";
+    animateBar(PRIORITY_PULL_MS);
+    setTimeout(tick, PRIORITY_PULL_MS);
+    return;
   }
 
   appendLogLine();
