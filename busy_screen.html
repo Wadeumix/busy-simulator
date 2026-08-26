@@ -600,7 +600,7 @@ function spinRouletteOnce(win, onDone){
   const totalSteps = LOOPS * segments.length + targetIndex + 1;
 
   // 最後の1/15区間に入るまでは等速(高速)で進み、そこから減速して当選コマにぴったり止まる
-  const DECEL_FRACTION = 1 / 15;
+  const DECEL_FRACTION = 1 / 4;
   const decelStartStep = Math.max(1, Math.floor(totalSteps * (1 - DECEL_FRACTION)));
   const fastSteps = decelStartStep;
   const decelSteps = totalSteps - decelStartStep;
