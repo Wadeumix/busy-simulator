@@ -773,7 +773,7 @@ function handleCommand(raw){
   } else if(cmd === "status"){
     printSystemLine(`config dump — rev.${state.coins}, income.L${state.incomeLevel}, odds.L${state.oddsLevel}, fx.L${state.fxLevel}, theme=${state.skinId}`);
   } else if(cmd === "help"){
-    printSystemLine(`available directives: buy income | buy odds | buy fx | buy skin <default|neon|amber> | status | debug roulette [n] | debug jackpot | debug bonus`);
+    printSystemLine(`available directives: buy income | buy odds | buy fx | buy skin <default|neon|amber> | status | debug roulette [n] | debug jackpot | debug bonus | debug anomaly`);
   } else if(cmd === "debug" && sub === "roulette"){
     const n = Math.max(1, parseInt(arg, 10) || 1);
     state.roulettePending += n;
@@ -787,6 +787,9 @@ function handleCommand(raw){
     printSystemLine(`debug: forced ×20 JACKPOT barrage`);
   } else if(cmd === "debug" && sub === "bonus"){
     showBonusPopup();
+  } else if(cmd === "debug" && sub === "anomaly"){
+    triggerCriticalEvent(20000);
+    printSystemLine(`debug: forced anomaly detected (20s)`);
   } else {
     printSystemLine(`unrecognized directive "${cmd}" — check syntax`);
   }
