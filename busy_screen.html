@@ -75,13 +75,14 @@
     100%{ transform:translate(0,0); }
   }
 
-  /* ---- ステータス行に紛れ込ませたコマンド入力欄 ---- */
+  /* ---- "T"キーで呼び出すコマンド入力欄(普段は非表示) ---- */
   #cmdInput{
     background:transparent; border:none; outline:none; padding:0;
     font-family:inherit; font-size:12px; color:var(--dim);
-    width:64px; caret-color:var(--dim);
+    width:0; opacity:0; caret-color:var(--dim);
+    transition:width .15s ease, opacity .15s ease;
   }
-  #cmdInput:focus{ width:220px; cursor:text; }
+  #cmdInput.active{ width:220px; opacity:1; cursor:text; }
 
   /* ---- 10ログ消化ごとのボーナス抽選ポップアップ ---- */
   #bonusOverlay{
@@ -372,8 +373,10 @@ function renderQueue(){
 }
 document.addEventListener("click", (e) => {
   if(e.target === cmdInput) return;
+  const wasIdle = pendingPulls <= 0 && !isProcessing;
   pendingPulls++;
   renderQueue();
+  if(wasIdle) tick();
 });
 
 // ---- 10ログ消化ごとのボーナス抽選 ----
@@ -483,19 +486,57 @@ function handleCommand(raw){
   }
 }
 
+function openCmdInput(){
+  cmdInput.classList.add("active");
+  cmdInput.focus();
+}
+function closeCmdInput(){
+  cmdInput.classList.remove("active");
+  cmdInput.value = "";
+  cmdInput.blur();
+}
+
+// ウィンドウがアクティブな状態で"T"を押すとコマンド入力欄が現れる
+document.addEventListener("keydown", (e) => {
+  if(document.activeElement === cmdInput) return;
+  if((e.key === "t" || e.key === "T") && !e.metaKey && !e.ctrlKey && !e.altKey){
+    e.preventDefault();
+    openCmdInput();
+  }
+});
+
 cmdInput.addEventListener("keydown", (e) => {
   e.stopPropagation();
   if(e.key === "Enter"){
     handleCommand(cmdInput.value);
-    cmdInput.value = "";
-    cmdInput.blur();
+    closeCmdInput();
+  } else if(e.key === "Escape"){
+    closeCmdInput();
   }
+});
+cmdInput.addEventListener("blur", () => {
+  closeCmdInput();
 });
 cmdInput.addEventListener("click", (e) => e.stopPropagation());
 
-function tick(){
-  const elapsed = performance.now() - startTime;
+// ログの生成・抽選は「処理待ちキューが残っている間」だけ動く。
+// キューが0になった時点でループは止まり、次にクリックでキューが積まれるまで完全アイドル
+let isProcessing = false;
 
+function goIdle(){
+  isProcessing = false;
+  statusText.textContent = "idle — waiting for jobs";
+  durText.textContent = "";
+}
+
+function tick(){
+  if(pendingPulls <= 0){
+    goIdle();
+    return;
+  }
+  isProcessing = true;
+
+  const elapsed = performance.now() - startTime;
   if(elapsed >= TOTAL_DURATION_MS){
     const div = document.createElement("div");
     div.className = "log-line ok";
@@ -505,6 +546,7 @@ function tick(){
     bar.style.width = "100%";
     pct.textContent = "100%";
     statusText.textContent = "完了";
+    isProcessing = false;
     return;
   }
 
@@ -514,24 +556,22 @@ function tick(){
   const seconds = pickBucket();
   const duration = seconds * 1000;
 
-  // 処理待ちキューが残っていれば、このtickの抽選結果を1件分だけ消化してコイン化する
-  if(pendingPulls > 0){
-    pendingPulls--;
-    renderQueue();
+  // tickが回ってきた = キューを1件消化するタイミング。ここで初めて抽選結果をコイン化する
+  pendingPulls--;
+  renderQueue();
 
-    let reward = REWARD_TABLE[seconds] || 1;
-    if(activeBuff && activeBuff.remaining > 0){
-      reward *= activeBuff.multiplier;
-      activeBuff.remaining--;
-      if(activeBuff.remaining <= 0) activeBuff = null;
-    }
-    addCoins(reward);
+  let reward = REWARD_TABLE[seconds] || 1;
+  if(activeBuff && activeBuff.remaining > 0){
+    reward *= activeBuff.multiplier;
+    activeBuff.remaining--;
+    if(activeBuff.remaining <= 0) activeBuff = null;
+  }
+  addCoins(reward);
 
-    resolvedSincePopup++;
-    if(resolvedSincePopup >= 10){
-      resolvedSincePopup = 0;
-      showBonusPopup();
-    }
+  resolvedSincePopup++;
+  if(resolvedSincePopup >= 10){
+    resolvedSincePopup = 0;
+    showBonusPopup();
   }
 
   if(seconds === 20){
