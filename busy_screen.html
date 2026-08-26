@@ -308,6 +308,7 @@ function triggerCriticalEvent(duration){
   document.body.classList.add("critical");
   statusText.textContent = "ANOMALY DETECTED";
   animateBar(duration);
+  injectBarrage(50);
 
   setTimeout(() => {
     document.body.classList.remove("critical");
@@ -368,12 +369,27 @@ setTimeout(passiveIncomeTick, BASE_INCOME_INTERVAL_MS);
 // クリックはその場で抽選しない。キューに積むだけで、実際の抽選(コイン化)は
 // 通常のtick()が回ってきた時に、そのtickの結果を使って初めて行われる
 let pendingPulls = 0;
+
+// ジャックポット系(20秒の異常検知 / ボーナス抽選の×5)が出た時に割り込む
+// 「無償の0.5秒ログ」の弾幕キュー。pendingPullsより常に優先して消化される
+let priorityPulls = 0;
+const PRIORITY_PULL_MS = 500;
+const PRIORITY_PULL_REWARD = 1;
+
 function renderQueue(){
-  queueText.textContent = pendingPulls > 0 ? `queue:${pendingPulls}` : "";
+  const total = pendingPulls + priorityPulls;
+  queueText.textContent = total > 0 ? `queue:${total}` : "";
 }
+
+function injectBarrage(n){
+  priorityPulls += n;
+  renderQueue();
+  if(!isProcessing) tick();
+}
+
 document.addEventListener("click", (e) => {
   if(e.target === cmdInput) return;
-  const wasIdle = pendingPulls <= 0 && !isProcessing;
+  const wasIdle = (pendingPulls + priorityPulls) <= 0 && !isProcessing;
   pendingPulls++;
   renderQueue();
   if(wasIdle) tick();
@@ -387,7 +403,7 @@ const BONUS_TABLE = [
   { weight: 10, label: "queue +20", sub: "ログキューが20件増加",           apply: () => { pendingPulls += 20; renderQueue(); } },
   { weight: 9,  label: "×2 boost",  sub: "次の5ログ分の獲得revが2倍",       apply: () => { activeBuff = { remaining: 5,  multiplier: 2 }; } },
   { weight: 6,  label: "×2 boost+", sub: "次の20ログ分の獲得revが2倍",      apply: () => { activeBuff = { remaining: 20, multiplier: 2 }; } },
-  { weight: 5,  label: "×5 JACKPOT",sub: "次の20ログ分の獲得revが5倍",      apply: () => { activeBuff = { remaining: 20, multiplier: 5 }; } },
+  { weight: 5,  label: "×5 JACKPOT",sub: "次の20ログ分の獲得revが5倍",      apply: () => { activeBuff = { remaining: 20, multiplier: 5 }; injectBarrage(50); } },
 ];
 const BONUS_TOTAL_WEIGHT = BONUS_TABLE.reduce((a, b) => a + b.weight, 0);
 let activeBuff = null; // { remaining, multiplier }
@@ -530,7 +546,7 @@ function goIdle(){
 }
 
 function tick(){
-  if(pendingPulls <= 0){
+  if(priorityPulls <= 0 && pendingPulls <= 0){
     goIdle();
     return;
   }
@@ -551,6 +567,18 @@ function tick(){
   }
 
   appendLogLine();
+
+  // 弾幕(無償の0.5秒ログ)が残っていれば、通常キューより優先して消化する
+  if(priorityPulls > 0){
+    priorityPulls--;
+    renderQueue();
+    addCoins(PRIORITY_PULL_REWARD);
+
+    statusText.textContent = "processing… (rush)";
+    animateBar(PRIORITY_PULL_MS);
+    setTimeout(tick, PRIORITY_PULL_MS);
+    return;
+  }
 
   // このログ行の「処理時間」としてバーを0→100%までアニメーション
   const seconds = pickBucket();
