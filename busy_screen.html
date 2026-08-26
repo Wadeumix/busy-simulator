@@ -320,7 +320,10 @@ function triggerCriticalEvent(duration){
 // 見た目は通常のログ/ステータス画面のまま、裏側でアイドルゲームの状態を管理する
 // =====================================================================
 const STATE_KEY = "busySimState";
-const DEFAULT_STATE = { coins: 0, incomeLevel: 0, oddsLevel: 0, skinId: "default", fxLevel: 0 };
+const DEFAULT_STATE = {
+  coins: 0, incomeLevel: 0, oddsLevel: 0, skinId: "default", fxLevel: 0,
+  pendingPulls: 0, priorityPulls: 0, resolvedSincePopup: 0, activeBuff: null,
+};
 
 function loadState(){
   try{
@@ -343,6 +346,7 @@ function renderCoins(){
   coinText.textContent = `rev.${state.coins}`;
 }
 renderCoins();
+renderQueue();
 
 function addCoins(n){
   state.coins += n;
@@ -368,29 +372,27 @@ setTimeout(passiveIncomeTick, BASE_INCOME_INTERVAL_MS);
 // ---- クリックによる「処理待ちログ」の積み上げ ----
 // クリックはその場で抽選しない。キューに積むだけで、実際の抽選(コイン化)は
 // 通常のtick()が回ってきた時に、そのtickの結果を使って初めて行われる
-let pendingPulls = 0;
-
-// ジャックポット系(20秒の異常検知 / ボーナス抽選の×5)が出た時に割り込む
-// 「無償の0.5秒ログ」の弾幕キュー。pendingPullsより常に優先して消化される
-let priorityPulls = 0;
+// (state.pendingPulls / state.priorityPulls / state.resolvedSincePopup / state.activeBuff は
+//  localStorageに永続化され、ウィンドウを閉じても引き継がれる)
 const PRIORITY_PULL_MS = 500;
 const PRIORITY_PULL_REWARD = 1;
 
 function renderQueue(){
-  const total = pendingPulls + priorityPulls;
+  const total = state.pendingPulls + state.priorityPulls;
   queueText.textContent = total > 0 ? `queue:${total}` : "";
+  saveState();
 }
 
 function injectBarrage(n){
-  priorityPulls += n;
+  state.priorityPulls += n;
   renderQueue();
   if(!isProcessing) tick();
 }
 
 document.addEventListener("click", (e) => {
   if(e.target === cmdInput) return;
-  const wasIdle = (pendingPulls + priorityPulls) <= 0 && !isProcessing;
-  pendingPulls++;
+  const wasIdle = (state.pendingPulls + state.priorityPulls) <= 0 && !isProcessing;
+  state.pendingPulls++;
   renderQueue();
   if(wasIdle) tick();
 });
@@ -398,16 +400,14 @@ document.addEventListener("click", (e) => {
 // ---- 10ログ消化ごとのボーナス抽選 ----
 // 上から下へ確率が減っていく。ログキュー増加グループが初期値80%、倍率グループが20%
 const BONUS_TABLE = [
-  { weight: 45, label: "queue +5",  sub: "ログキューが5件増加",            apply: () => { pendingPulls += 5;  renderQueue(); } },
-  { weight: 25, label: "queue +10", sub: "ログキューが10件増加",           apply: () => { pendingPulls += 10; renderQueue(); } },
-  { weight: 10, label: "queue +20", sub: "ログキューが20件増加",           apply: () => { pendingPulls += 20; renderQueue(); } },
-  { weight: 9,  label: "×2 boost",  sub: "次の5ログ分の獲得revが2倍",       apply: () => { activeBuff = { remaining: 5,  multiplier: 2 }; } },
-  { weight: 6,  label: "×2 boost+", sub: "次の20ログ分の獲得revが2倍",      apply: () => { activeBuff = { remaining: 20, multiplier: 2 }; } },
-  { weight: 5,  label: "×5 JACKPOT",sub: "次の20ログ分の獲得revが5倍",      apply: () => { activeBuff = { remaining: 20, multiplier: 5 }; injectBarrage(50); } },
+  { weight: 45, label: "queue +5",  sub: "ログキューが5件増加",            apply: () => { state.pendingPulls += 5;  renderQueue(); } },
+  { weight: 25, label: "queue +10", sub: "ログキューが10件増加",           apply: () => { state.pendingPulls += 10; renderQueue(); } },
+  { weight: 10, label: "queue +20", sub: "ログキューが20件増加",           apply: () => { state.pendingPulls += 20; renderQueue(); } },
+  { weight: 9,  label: "×2 boost",  sub: "次の5ログ分の獲得revが2倍",       apply: () => { state.activeBuff = { remaining: 5,  multiplier: 2 }; saveState(); } },
+  { weight: 6,  label: "×2 boost+", sub: "次の20ログ分の獲得revが2倍",      apply: () => { state.activeBuff = { remaining: 20, multiplier: 2 }; saveState(); } },
+  { weight: 5,  label: "×5 JACKPOT",sub: "次の20ログ分の獲得revが5倍",      apply: () => { state.activeBuff = { remaining: 20, multiplier: 5 }; saveState(); injectBarrage(50); } },
 ];
 const BONUS_TOTAL_WEIGHT = BONUS_TABLE.reduce((a, b) => a + b.weight, 0);
-let activeBuff = null; // { remaining, multiplier }
-let resolvedSincePopup = 0;
 let bonusHideTimer = null;
 
 function pickBonus(){
@@ -546,7 +546,7 @@ function goIdle(){
 }
 
 function tick(){
-  if(priorityPulls <= 0 && pendingPulls <= 0){
+  if(state.priorityPulls <= 0 && state.pendingPulls <= 0){
     goIdle();
     return;
   }
@@ -569,16 +569,17 @@ function tick(){
   appendLogLine();
 
   // 弾幕(無償の0.5秒ログ)が残っていれば、通常キューより優先して消化する
-  if(priorityPulls > 0){
-    priorityPulls--;
+  if(state.priorityPulls > 0){
+    state.priorityPulls--;
     renderQueue();
     addCoins(PRIORITY_PULL_REWARD);
 
-    resolvedSincePopup++;
-    if(resolvedSincePopup >= 10){
-      resolvedSincePopup = 0;
+    state.resolvedSincePopup++;
+    if(state.resolvedSincePopup >= 10){
+      state.resolvedSincePopup = 0;
       showBonusPopup();
     }
+    saveState();
 
     statusText.textContent = "processing… (rush)";
     animateBar(PRIORITY_PULL_MS);
@@ -591,22 +592,23 @@ function tick(){
   const duration = seconds * 1000;
 
   // tickが回ってきた = キューを1件消化するタイミング。ここで初めて抽選結果をコイン化する
-  pendingPulls--;
+  state.pendingPulls--;
   renderQueue();
 
   let reward = REWARD_TABLE[seconds] || 1;
-  if(activeBuff && activeBuff.remaining > 0){
-    reward *= activeBuff.multiplier;
-    activeBuff.remaining--;
-    if(activeBuff.remaining <= 0) activeBuff = null;
+  if(state.activeBuff && state.activeBuff.remaining > 0){
+    reward *= state.activeBuff.multiplier;
+    state.activeBuff.remaining--;
+    if(state.activeBuff.remaining <= 0) state.activeBuff = null;
   }
   addCoins(reward);
 
-  resolvedSincePopup++;
-  if(resolvedSincePopup >= 10){
-    resolvedSincePopup = 0;
+  state.resolvedSincePopup++;
+  if(state.resolvedSincePopup >= 10){
+    state.resolvedSincePopup = 0;
     showBonusPopup();
   }
+  saveState();
 
   if(seconds === 20){
     triggerCriticalEvent(duration);
