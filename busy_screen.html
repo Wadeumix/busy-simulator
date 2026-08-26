@@ -314,7 +314,18 @@ function triggerCriticalEvent(duration){
   document.body.classList.add("critical");
   statusText.textContent = "ANOMALY DETECTED";
   animateBar(duration);
+
+  // ログ50件のラッシュにrouletteNの倍率を乗せる(既存のバフは上書きされる)
+  state.activeBuff = { remaining: 50, multiplier: state.rouletteN };
+  saveState();
   injectBarrage(50);
+
+  // 高速ルーレットを10回分キューに追加(次に消化される10回は通常より短い時間で回る)
+  state.roulettePending += 10;
+  state.fastSpinsRemaining += 10;
+  saveState();
+  renderQueue();
+  if(!isProcessing) tick();
 
   setTimeout(() => {
     document.body.classList.remove("critical");
@@ -329,7 +340,7 @@ const STATE_KEY = "busySimState";
 const DEFAULT_STATE = {
   coins: 0, incomeLevel: 0, oddsLevel: 0, skinId: "default", fxLevel: 0,
   pendingPulls: 0, priorityPulls: 0, resolvedSincePopup: 0, activeBuff: null,
-  roulettePending: 0, rouletteN: 2,
+  roulettePending: 0, rouletteN: 2, fastSpinsRemaining: 0,
 };
 
 function loadState(){
@@ -612,10 +623,17 @@ function spinRouletteOnce(win, onDone){
   const targetIndex = randInt(0, segments.length - 1);
   const winningColor = segments[targetIndex];
 
+  // 異常検知で積まれた「高速ルーレット」の残数があれば、このスピンは短時間で回す
+  const isFast = state.fastSpinsRemaining > 0;
+  if(isFast){
+    state.fastSpinsRemaining--;
+    saveState();
+  }
+
   // 左から右へ1コマずつハイライトが移動し、周回しながら当選コマに止まる
-  // 全体の所要時間は30秒〜2分でランダムに決め、その時間をステップ間隔に配分する
-  const TOTAL_SPIN_MS = randInt(30000, 120000);
-  const LOOPS = randInt(12, 20);
+  // 全体の所要時間は通常30秒〜2分。高速時は固定10秒
+  const TOTAL_SPIN_MS = isFast ? 10000 : randInt(30000, 120000);
+  const LOOPS = isFast ? randInt(2, 4) : randInt(12, 20);
   const totalSteps = LOOPS * segments.length + targetIndex + 1;
 
   // 全区間にわたって減速させる。カーブはsmoothstep(3t²-2t³)を使い、
@@ -923,6 +941,9 @@ function tick(){
   renderQueue();
 
   let reward = REWARD_TABLE[seconds] || 1;
+  if(seconds === 20){
+    reward *= state.rouletteN; // 異常検知の基礎報酬(5000)にもrouletteN倍を適用
+  }
   if(state.activeBuff && state.activeBuff.remaining > 0){
     reward *= state.activeBuff.multiplier;
     state.activeBuff.remaining--;
