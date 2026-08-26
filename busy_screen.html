@@ -479,8 +479,16 @@ function applyRouletteColor(color){
   }
 }
 
-const ROULETTE_TILE_PX = 46; // タイル幅(40) + margin-right(6)
 let rouletteWin = null;
+
+function shuffled(arr){
+  const a = arr.slice();
+  for(let i = a.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 function rouletteWindowClosedOrMissing(){
   return !rouletteWin || rouletteWin.closed;
@@ -507,24 +515,23 @@ function buildRouletteWindow(){
       border-bottom:1px solid #30363d; font-size:13px; color:#8b949e; flex-shrink:0;
     }
     .body{ padding:18px 20px; flex:1; display:flex; flex-direction:column; }
-    .subline{ font-size:12px; color:#8b949e; margin-bottom:14px; }
+    .subline{ font-size:12px; color:#8b949e; margin-bottom:6px; }
     .stack{ font-size:11px; color:#8b949e; margin-bottom:10px; min-height:14px; }
     .viewport{
-      position:relative; overflow:hidden;
-      width:100%; height:34px;
+      overflow:hidden; width:100%; padding:8px;
       border:1px solid #30363d; border-radius:4px; background:#010409;
     }
-    .strip{ position:absolute; top:0; left:0; display:flex; align-items:center; height:100%; }
-    .tile{ width:40px; height:22px; flex:0 0 auto; margin-right:6px; border-radius:2px; }
+    .strip{ display:flex; gap:2px; }
+    .tile{
+      flex:1 1 0; height:20px; border-radius:1px;
+      opacity:.38; transition:opacity .12s ease, transform .12s ease;
+    }
+    .tile.active{ opacity:1; transform:scaleY(1.2); }
     .t-blue{ background:#58a6ff; }
     .t-yellow{ background:#c9a227; }
     .t-green{ background:#3fb950; }
     .t-orange{ background:#c9822f; }
     .t-red{ background:#f85149; }
-    .pointer{
-      position:absolute; top:0; left:50%; transform:translateX(-50%);
-      width:2px; height:100%; background:#c9d1d9; opacity:.6;
-    }
     .result-row{ margin-top:14px; font-size:12.5px; }
     .result{ color:#c9d1d9; }
     .result::before{ content:"i "; color:#8b949e; }
@@ -533,11 +540,10 @@ function buildRouletteWindow(){
   win.document.body.innerHTML = `
     <div class="topbar">build-pipeline — verification</div>
     <div class="body">
-      <div class="subline">resolving candidate patch across worker pool…</div>
+      <div class="subline" id="counter">resolving candidate patch…</div>
       <div class="stack" id="stack"></div>
       <div class="viewport" id="viewport">
         <div class="strip" id="strip"></div>
-        <div class="pointer"></div>
       </div>
       <div class="result-row"><span class="result" id="result"></span></div>
       <div class="sub" id="sub"></div>
@@ -556,55 +562,50 @@ function ensureRouletteWindow(){
 function spinRouletteOnce(win, onDone){
   const doc = win.document;
   const strip = doc.getElementById("strip");
-  const viewport = doc.getElementById("viewport");
   const resultEl = doc.getElementById("result");
   const subEl = doc.getElementById("sub");
+  const counterEl = doc.getElementById("counter");
   resultEl.textContent = "";
   subEl.textContent = "";
 
-  // 長い帯を作る(見た目の周回数を確保するため、ホイールを何度も繰り返す)
-  const REPEATS = 8;
-  const strip_tiles = [];
-  for(let r = 0; r < REPEATS; r++){
-    for(const color of ROULETTE_WHEEL) strip_tiles.push(color);
-  }
-  strip.innerHTML = strip_tiles.map(c => `<div class="tile t-${c}"></div>`).join("");
+  // コマの色を毎回ランダムに並べ替えて固定表示する(スクロールはしない)
+  const segments = shuffled(ROULETTE_WHEEL);
+  strip.innerHTML = segments.map(c => `<div class="tile t-${c}"></div>`).join("");
+  const tiles = Array.from(strip.children);
 
-  // 当選色を決定(コマ数がそのまま確率になる)し、後方の周回から着地先タイルを選ぶ
-  const winningColor = pick(ROULETTE_WHEEL);
-  const lastRepeatStart = (REPEATS - 1) * ROULETTE_WHEEL.length;
-  const candidates = [];
-  for(let i = 0; i < ROULETTE_WHEEL.length; i++){
-    if(ROULETTE_WHEEL[i] === winningColor) candidates.push(lastRepeatStart + i);
-  }
-  const targetIndex = pick(candidates);
+  // 当選タイルを決定(コマ数の比率がそのまま確率になる)
+  const targetIndex = randInt(0, segments.length - 1);
+  const winningColor = segments[targetIndex];
 
-  const viewportWidth = viewport.clientWidth;
-  const finalX = -(targetIndex * ROULETTE_TILE_PX) + (viewportWidth / 2 - 40 / 2);
+  // 左から右へ1コマずつハイライトが移動し、周回を重ねながら慣性で減速して当選コマに止まる
+  const LOOPS = 2;
+  const totalSteps = LOOPS * segments.length + targetIndex + 1;
+  let step = 0;
+  let prevTile = null;
 
-  // フェーズ1: 高速で等速スクロール(ロード風)
-  strip.style.transition = "none";
-  strip.style.transform = "translateX(0px)";
-  void strip.offsetWidth;
-  strip.style.transition = `transform 0.6s linear`;
-  strip.style.transform = `translateX(${-ROULETTE_TILE_PX * 10}px)`;
+  function advance(){
+    if(prevTile) prevTile.classList.remove("active");
+    const idx = step % segments.length;
+    tiles[idx].classList.add("active");
+    prevTile = tiles[idx];
+    step++;
+    counterEl.textContent = `resolving candidate patch — segment ${Math.min(step, totalSteps)}/${totalSteps}`;
 
-  win.setTimeout(() => {
-    // フェーズ2: 慣性で減速しながら当選タイルへ着地
-    strip.style.transition = "none";
-    strip.style.transform = `translateX(${-ROULETTE_TILE_PX * 10}px)`;
-    void strip.offsetWidth;
-    strip.style.transition = `transform 3.2s cubic-bezier(0.09,0.82,0.13,1)`;
-    strip.style.transform = `translateX(${finalX}px)`;
-
-    win.setTimeout(() => {
+    if(step >= totalSteps){
       applyRouletteColor(winningColor);
       const info = ROULETTE_COLORS[winningColor];
       resultEl.textContent = info.label;
       subEl.textContent = info.sub();
       win.setTimeout(onDone, 1400);
-    }, 3300);
-  }, 650);
+      return;
+    }
+
+    // 進捗が進むほど間隔を広げ、慣性で減速しているように見せる
+    const progress = step / totalSteps;
+    const delay = 35 + Math.pow(progress, 3) * 260;
+    win.setTimeout(advance, delay);
+  }
+  advance();
 }
 
 function startRouletteSequence(){
