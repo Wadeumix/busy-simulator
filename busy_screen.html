@@ -518,24 +518,32 @@ function buildRouletteWindow(){
     .subline{ font-size:12px; color:#8b949e; margin-bottom:6px; }
     .stack{ font-size:11px; color:#8b949e; margin-bottom:10px; min-height:14px; }
     .viewport{
-      overflow:hidden; width:100%; padding:8px;
+      overflow:hidden; width:100%; height:8px;
       border:1px solid #30363d; border-radius:4px; background:#010409;
     }
-    .strip{ display:flex; gap:2px; }
+    .strip{ display:flex; gap:1px; height:100%; }
     .tile{
-      flex:1 1 0; height:20px; border-radius:1px;
-      opacity:.38; transition:opacity .12s ease, transform .12s ease;
+      flex:1 1 0; height:100%; border-radius:0;
+      opacity:.35; transition:opacity .12s ease;
     }
-    .tile.active{ opacity:1; transform:scaleY(1.2); }
+    .tile.active{ opacity:1; }
     .t-blue{ background:#58a6ff; }
     .t-yellow{ background:#c9a227; }
     .t-green{ background:#3fb950; }
     .t-orange{ background:#c9822f; }
     .t-red{ background:#f85149; }
-    .result-row{ margin-top:14px; font-size:12.5px; }
-    .result{ color:#c9d1d9; }
-    .result::before{ content:"i "; color:#8b949e; }
-    .sub{ font-size:12px; color:#8b949e; margin-top:3px; }
+    .result-box{
+      margin-top:16px; background:#161b22; border:1px solid #30363d; border-radius:6px;
+      padding:14px 18px; opacity:0; transition:opacity .2s ease;
+    }
+    .result-box.show{ opacity:1; }
+    .result-box .box-title{
+      font-size:11px; color:#8b949e; letter-spacing:.03em;
+      border-bottom:1px solid #30363d; padding-bottom:6px; margin-bottom:8px;
+    }
+    .result-box .result{ font-size:13px; color:#c9d1d9; margin:0 0 3px; }
+    .result-box .result::before{ content:"✓ "; color:#3fb950; }
+    .result-box .sub{ font-size:12px; color:#8b949e; }
   </style>`;
   win.document.body.innerHTML = `
     <div class="topbar">build-pipeline — verification</div>
@@ -545,8 +553,11 @@ function buildRouletteWindow(){
       <div class="viewport" id="viewport">
         <div class="strip" id="strip"></div>
       </div>
-      <div class="result-row"><span class="result" id="result"></span></div>
-      <div class="sub" id="sub"></div>
+      <div class="result-box" id="resultBox">
+        <div class="box-title">config sync — patch candidate applied</div>
+        <div class="result" id="result"></div>
+        <div class="sub" id="sub"></div>
+      </div>
     </div>
   `;
   return win;
@@ -565,8 +576,10 @@ function spinRouletteOnce(win, onDone){
   const resultEl = doc.getElementById("result");
   const subEl = doc.getElementById("sub");
   const counterEl = doc.getElementById("counter");
+  const resultBox = doc.getElementById("resultBox");
   resultEl.textContent = "";
   subEl.textContent = "";
+  resultBox.classList.remove("show");
 
   // コマの色を毎回ランダムに並べ替えて固定表示する(スクロールはしない)
   const segments = shuffled(ROULETTE_WHEEL);
@@ -577,9 +590,20 @@ function spinRouletteOnce(win, onDone){
   const targetIndex = randInt(0, segments.length - 1);
   const winningColor = segments[targetIndex];
 
-  // 左から右へ1コマずつハイライトが移動し、周回を重ねながら慣性で減速して当選コマに止まる
-  const LOOPS = 2;
+  // 左から右へ1コマずつハイライトが移動し、多めに周回しながら慣性で減速して当選コマに止まる
+  // 全体の所要時間は1分〜2分でランダムに決め、その時間をステップ間隔に配分する
+  const TOTAL_SPIN_MS = randInt(60000, 120000);
+  const LOOPS = randInt(12, 20);
   const totalSteps = LOOPS * segments.length + targetIndex + 1;
+
+  // 進捗が進むほど重みを大きくする(3乗カーブ)ことで、後半ほど間隔が長くなる=減速して見える
+  const weights = [];
+  for(let i = 0; i < totalSteps; i++){
+    weights.push(Math.pow((i + 1) / totalSteps, 3));
+  }
+  const weightSum = weights.reduce((a, b) => a + b, 0);
+  const delays = weights.map(w => (w / weightSum) * TOTAL_SPIN_MS);
+
   let step = 0;
   let prevTile = null;
 
@@ -596,14 +620,12 @@ function spinRouletteOnce(win, onDone){
       const info = ROULETTE_COLORS[winningColor];
       resultEl.textContent = info.label;
       subEl.textContent = info.sub();
-      win.setTimeout(onDone, 1400);
+      resultBox.classList.add("show");
+      win.setTimeout(onDone, 1800);
       return;
     }
 
-    // 進捗が進むほど間隔を広げ、慣性で減速しているように見せる
-    const progress = step / totalSteps;
-    const delay = 35 + Math.pow(progress, 3) * 260;
-    win.setTimeout(advance, delay);
+    win.setTimeout(advance, delays[step]);
   }
   advance();
 }
