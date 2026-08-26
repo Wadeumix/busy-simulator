@@ -103,6 +103,9 @@
   #bonusBox .bonus-result{ font-size:16px; color:var(--accent); font-weight:bold; margin:10px 0 4px; }
   #bonusBox .bonus-sub{ font-size:12px; color:var(--dim); }
 
+  /* ---- 黄色いログ(ルーレット発生トリガー) ---- */
+  .roulette-line{ color:#facc15 !important; font-weight:bold; }
+
   /* ---- スキン(見た目)プリセット ---- */
   body.skin-neon .bar-inner{ background:linear-gradient(90deg,#d63bff,#39ffe0) !important; }
   body.skin-neon{ font-family:"Courier New",monospace; }
@@ -151,7 +154,6 @@ const clock = document.getElementById("clock");
 const bonusOverlay = document.getElementById("bonusOverlay");
 const bonusResult = document.getElementById("bonusResult");
 const bonusSub = document.getElementById("bonusSub");
-
 function updateClock(){
   clock.textContent = new Date().toLocaleTimeString();
 }
@@ -323,6 +325,7 @@ const STATE_KEY = "busySimState";
 const DEFAULT_STATE = {
   coins: 0, incomeLevel: 0, oddsLevel: 0, skinId: "default", fxLevel: 0,
   pendingPulls: 0, priorityPulls: 0, resolvedSincePopup: 0, activeBuff: null,
+  roulettePending: 0, rouletteN: 2,
 };
 
 function loadState(){
@@ -378,7 +381,7 @@ const PRIORITY_PULL_MS = 500;
 const PRIORITY_PULL_REWARD = 1;
 
 function renderQueue(){
-  const total = state.pendingPulls + state.priorityPulls;
+  const total = state.pendingPulls + state.priorityPulls + state.roulettePending;
   queueText.textContent = total > 0 ? `queue:${total}` : "";
   saveState();
 }
@@ -391,7 +394,7 @@ function injectBarrage(n){
 
 document.addEventListener("click", (e) => {
   if(e.target === cmdInput) return;
-  const wasIdle = (state.pendingPulls + state.priorityPulls) <= 0 && !isProcessing;
+  const wasIdle = (state.pendingPulls + state.priorityPulls + state.roulettePending) <= 0 && !isProcessing;
   state.pendingPulls++;
   renderQueue();
   if(wasIdle) tick();
@@ -407,8 +410,8 @@ const BONUS_TABLE = [
   { weight: 8,  label: "queue +20", sub: "ログキューが20件増加",             apply: () => { state.pendingPulls += 20; renderQueue(); } },
   { weight: 6,  label: "×2 boost",  sub: "次の5ログ分の獲得revが2倍",         apply: () => { state.activeBuff = { remaining: 5,  multiplier: 2 }; saveState(); } },
   { weight: 3,  label: "×2 boost+", sub: "次の20ログ分の獲得revが2倍",        apply: () => { state.activeBuff = { remaining: 20, multiplier: 2 }; saveState(); } },
-  // ルーレット要素は後ほど拡張予定。現状は暫定でキュー+1のみ
-  { weight: 2,  label: "roulette",  sub: "ルーレットログが1件キューに追加",   apply: () => { state.pendingPulls += 1; renderQueue(); } },
+  // ルーレットは専用キュー(roulettePending)に積む。ラッシュ終了後、通常キューより先に消化される
+  { weight: 2,  label: "roulette",  sub: "ルーレットが1件キューに追加",       apply: () => { state.roulettePending += 1; renderQueue(); } },
   { weight: 1,  label: "×20 JACKPOT", sub: "次の20ログ分の獲得revが20倍 + 無償ログ100件が割り込み", apply: () => { state.activeBuff = { remaining: 20, multiplier: 20 }; saveState(); injectBarrage(100); } },
 ];
 const BONUS_TOTAL_WEIGHT = BONUS_TABLE.reduce((a, b) => a + b.weight, 0);
@@ -433,6 +436,210 @@ function showBonusPopup(){
   bonusHideTimer = setTimeout(() => {
     bonusOverlay.classList.remove("show");
   }, 2600);
+}
+
+// =====================================================================
+// ---- ルーレット(独立した別ウィンドウで開く) ----
+// 青が最も多くコマを占め、赤は全体の中でただ1コマだけ(スーパージャックポット)
+// =====================================================================
+const ROULETTE_WHEEL = [
+  "blue","blue","blue","blue","blue","blue","blue","blue","blue","blue",
+  "yellow","yellow","yellow","yellow","yellow",
+  "green","green",
+  "orange","orange",
+  "red",
+];
+const ROULETTE_COLORS = {
+  blue:   { label: "queue +50",        sub: () => "通常キューが50件増加" },
+  yellow: { label: "rush +100",        sub: () => "ラッシュキューが100件増加" },
+  green:  { label: "rev bonus",        sub: () => `${state.rouletteN}万revを獲得` },
+  orange: { label: "multiplier up",    sub: () => `倍率係数(N)が永久に×5 → 次はN=${state.rouletteN * 5}` },
+  red:    { label: "SUPER JACKPOT",    sub: () => `5000件のラッシュログが${state.rouletteN}倍で発生` },
+};
+function applyRouletteColor(color){
+  if(color === "blue"){
+    state.pendingPulls += 50;
+    renderQueue();
+  } else if(color === "yellow"){
+    state.priorityPulls += 100;
+    renderQueue();
+  } else if(color === "green"){
+    addCoins(state.rouletteN * 10000);
+  } else if(color === "orange"){
+    state.rouletteN *= 5;
+    saveState();
+  } else if(color === "red"){
+    state.activeBuff = { remaining: 5000, multiplier: state.rouletteN };
+    saveState();
+    injectBarrage(5000);
+  }
+}
+
+const ROULETTE_TILE_PX = 56; // タイル幅(48) + margin-right(8)
+let rouletteWin = null;
+
+function rouletteWindowClosedOrMissing(){
+  return !rouletteWin || rouletteWin.closed;
+}
+
+function buildRouletteWindow(){
+  const w = 360, h = 300;
+  const left = Math.round((screen.width - w) / 2);
+  const top = Math.round((screen.height - h) / 2);
+  const win = window.open("", "rouletteWin",
+    `width=${w},height=${h},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=no`);
+  if(!win) return null;
+
+  win.document.title = "diagnostic roulette";
+  win.document.head.innerHTML = `<style>
+    *{box-sizing:border-box;}
+    body{
+      margin:0; height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+      background:#0d1117; color:#c9d1d9; font-family:"SF Mono","Consolas","Menlo",monospace;
+      cursor:wait;
+    }
+    .title{ font-size:12px; color:#facc15; letter-spacing:.1em; }
+    .stack{ font-size:11px; color:#8b949e; margin-top:2px; min-height:14px; }
+    .viewport{
+      position:relative; overflow:hidden; margin:16px auto 0;
+      width:296px; height:56px;
+      border:1px solid #30363d; border-radius:6px; background:#010409;
+    }
+    .strip{ position:absolute; top:0; left:0; display:flex; }
+    .tile{ width:48px; height:56px; flex:0 0 auto; margin-right:8px; border-radius:4px; opacity:.92; }
+    .t-blue{ background:linear-gradient(180deg,#60a5fa,#2563eb); }
+    .t-yellow{ background:linear-gradient(180deg,#fde047,#eab308); }
+    .t-green{ background:linear-gradient(180deg,#4ade80,#16a34a); }
+    .t-orange{ background:linear-gradient(180deg,#fb923c,#ea580c); }
+    .t-red{ background:linear-gradient(180deg,#f87171,#dc2626); box-shadow:0 0 10px rgba(239,68,68,.7); }
+    .pointer{
+      position:absolute; top:-6px; left:50%; transform:translateX(-50%);
+      width:0; height:0; border-left:7px solid transparent; border-right:7px solid transparent;
+      border-top:9px solid #facc15;
+    }
+    .result{ font-size:15px; font-weight:bold; margin-top:14px; min-height:20px; }
+    .sub{ font-size:12px; color:#8b949e; margin-top:2px; text-align:center; padding:0 16px; }
+  </style>`;
+  win.document.body.innerHTML = `
+    <div class="title">diagnostic roulette</div>
+    <div class="stack" id="stack"></div>
+    <div class="viewport" id="viewport">
+      <div class="strip" id="strip"></div>
+      <div class="pointer"></div>
+    </div>
+    <div class="result" id="result"></div>
+    <div class="sub" id="sub"></div>
+  `;
+  return win;
+}
+
+function ensureRouletteWindow(){
+  if(rouletteWindowClosedOrMissing()){
+    rouletteWin = buildRouletteWindow();
+  }
+  return rouletteWin;
+}
+
+function spinRouletteOnce(win, onDone){
+  const doc = win.document;
+  const strip = doc.getElementById("strip");
+  const viewport = doc.getElementById("viewport");
+  const resultEl = doc.getElementById("result");
+  const subEl = doc.getElementById("sub");
+  resultEl.textContent = "";
+  subEl.textContent = "";
+
+  // 長い帯を作る(見た目の周回数を確保するため、ホイールを何度も繰り返す)
+  const REPEATS = 8;
+  const strip_tiles = [];
+  for(let r = 0; r < REPEATS; r++){
+    for(const color of ROULETTE_WHEEL) strip_tiles.push(color);
+  }
+  strip.innerHTML = strip_tiles.map(c => `<div class="tile t-${c}"></div>`).join("");
+
+  // 当選色を決定(コマ数がそのまま確率になる)し、後方の周回から着地先タイルを選ぶ
+  const winningColor = pick(ROULETTE_WHEEL);
+  const lastRepeatStart = (REPEATS - 1) * ROULETTE_WHEEL.length;
+  const candidates = [];
+  for(let i = 0; i < ROULETTE_WHEEL.length; i++){
+    if(ROULETTE_WHEEL[i] === winningColor) candidates.push(lastRepeatStart + i);
+  }
+  const targetIndex = pick(candidates);
+
+  const viewportWidth = viewport.clientWidth;
+  const finalX = -(targetIndex * ROULETTE_TILE_PX) + (viewportWidth / 2 - 48 / 2);
+
+  // フェーズ1: 高速で等速スクロール(ロード風)
+  strip.style.transition = "none";
+  strip.style.transform = "translateX(0px)";
+  void strip.offsetWidth;
+  strip.style.transition = `transform 0.6s linear`;
+  strip.style.transform = `translateX(${-ROULETTE_TILE_PX * 10}px)`;
+
+  win.setTimeout(() => {
+    // フェーズ2: 慣性で減速しながら当選タイルへ着地
+    strip.style.transition = "none";
+    strip.style.transform = `translateX(${-ROULETTE_TILE_PX * 10}px)`;
+    void strip.offsetWidth;
+    strip.style.transition = `transform 3.2s cubic-bezier(0.09,0.82,0.13,1)`;
+    strip.style.transform = `translateX(${finalX}px)`;
+
+    win.setTimeout(() => {
+      applyRouletteColor(winningColor);
+      const info = ROULETTE_COLORS[winningColor];
+      resultEl.textContent = info.label;
+      subEl.textContent = info.sub();
+      resultEl.style.color = winningColor === "red" ? "#f87171" : "#facc15";
+      win.setTimeout(onDone, 1400);
+    }, 3300);
+  }, 650);
+}
+
+function startRouletteSequence(){
+  const win = ensureRouletteWindow();
+  if(!win){
+    // ポップアップがブロックされた場合は、演出なしで抽選だけ実行してキューを消化する
+    // (tick()側でこの回の分は既にroulettePendingからデクリメント済み)
+    applyRouletteColor(pick(ROULETTE_WHEEL));
+    while(state.roulettePending > 0){
+      state.roulettePending--;
+      applyRouletteColor(pick(ROULETTE_WHEEL));
+    }
+    renderQueue();
+    tick();
+    return;
+  }
+
+  function runNext(){
+    if(rouletteWindowClosedOrMissing()){
+      // ユーザーが手動でウィンドウを閉じた場合は、残りは抽選だけ即時消化
+      while(state.roulettePending > 0){
+        state.roulettePending--;
+        applyRouletteColor(pick(ROULETTE_WHEEL));
+      }
+      renderQueue();
+      tick();
+      return;
+    }
+    const stackEl = win.document.getElementById("stack");
+    if(stackEl){
+      stackEl.textContent = state.roulettePending > 0 ? `stack: +${state.roulettePending}` : "";
+    }
+    spinRouletteOnce(win, () => {
+      if(state.roulettePending > 0){
+        state.roulettePending--;
+        renderQueue();
+        runNext();
+      } else {
+        win.setTimeout(() => {
+          if(!rouletteWindowClosedOrMissing()) win.close();
+          rouletteWin = null;
+          tick();
+        }, 600);
+      }
+    });
+  }
+  runNext();
 }
 
 // ---- アップグレードのコスト計算 ----
@@ -550,7 +757,7 @@ function goIdle(){
 }
 
 function tick(){
-  if(state.priorityPulls <= 0 && state.pendingPulls <= 0){
+  if(state.priorityPulls <= 0 && state.pendingPulls <= 0 && state.roulettePending <= 0){
     goIdle();
     return;
   }
@@ -568,6 +775,20 @@ function tick(){
     statusText.textContent = "完了";
     isProcessing = false;
     return;
+  }
+
+  // ラッシュが空になった時点で、ルーレット枠(roulettePending)を通常キューより優先して消化する
+  if(state.priorityPulls <= 0 && state.roulettePending > 0){
+    const div = document.createElement("div");
+    div.className = "log-line roulette-line";
+    div.textContent = "◆ diagnostic roulette scheduled — opening secondary console";
+    logEl.appendChild(div);
+
+    state.roulettePending--;
+    renderQueue();
+    statusText.textContent = "roulette in progress…";
+    startRouletteSequence();
+    return; // ルーレットの決着がつくまでtickループは一時停止する
   }
 
   appendLogLine();
