@@ -341,7 +341,7 @@ const STATE_KEY = "busySimState";
 const DEFAULT_STATE = {
   coins: 0, incomeLevel: 0, oddsLevel: 0, skinId: "default", fxLevel: 0,
   pendingPulls: 0, priorityPulls: 0, resolvedSincePopup: 0, activeBuff: null,
-  roulettePending: 0, rouletteN: 2, fastSpinsRemaining: 0, nextRushMilestone: 500, fastRushRemaining: 0,
+  roulettePending: 0, rouletteN: 2, fastSpinsRemaining: 0, fastRushRemaining: 0,
 };
 
 function loadState(){
@@ -443,12 +443,16 @@ function triggerRushMilestone(){
   showRouletteWaiting();
 }
 
+const RUSH_MILESTONE_STEP = 500;
+
 function injectBarrage(n){
+  // 累積カウンターではなく、現在のラッシュ在庫(スタック数)自体が
+  // 500の倍数をいくつ跨いだかで判定する(途中からの再開でも正しく動く)
+  const before = Math.floor(state.priorityPulls / RUSH_MILESTONE_STEP);
   state.priorityPulls += n;
-  while(state.priorityPulls >= state.nextRushMilestone){
-    state.nextRushMilestone += 500;
-    triggerRushMilestone();
-  }
+  const after = Math.floor(state.priorityPulls / RUSH_MILESTONE_STEP);
+  for(let i = 0; i < after - before; i++) triggerRushMilestone();
+
   renderQueue();
   if(!isProcessing) tick();
 }
