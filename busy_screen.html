@@ -526,8 +526,7 @@ function applyRouletteColor(color){
     state.pendingPulls += 50;
     renderQueue();
   } else if(color === "yellow"){
-    state.priorityPulls += 100;
-    renderQueue();
+    injectBarrage(100); // 500件マイルストーン判定を通すため、直接加算せずinjectBarrage経由にする
   } else if(color === "green"){
     addCoins(state.rouletteN * 10000);
   } else if(color === "orange"){
