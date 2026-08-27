@@ -453,8 +453,16 @@ function injectBarrage(n){
   if(!isProcessing) tick();
 }
 
+// クリック10回で処理待ちキュー1件分になる
+let clickTally = 0;
+const CLICKS_PER_PULL = 10;
+
 document.addEventListener("click", (e) => {
   if(e.target === cmdInput) return;
+  clickTally++;
+  if(clickTally < CLICKS_PER_PULL) return;
+  clickTally = 0;
+
   const wasIdle = (state.pendingPulls + state.priorityPulls + state.roulettePending) <= 0 && !isProcessing;
   state.pendingPulls++;
   renderQueue();
