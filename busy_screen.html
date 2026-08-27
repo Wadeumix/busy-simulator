@@ -416,7 +416,9 @@ const PRIORITY_PULL_REWARD = 1;
 
 function renderQueue(){
   const total = state.pendingPulls + state.priorityPulls + state.roulettePending;
-  queueText.textContent = total > 0 ? `queue:${total}` : "";
+  queueText.textContent = total > 0
+    ? `queue:${total}${state.priorityPulls > 0 ? ` (rush:${state.priorityPulls})` : ""}`
+    : "";
   saveState();
 }
 
@@ -806,7 +808,7 @@ function handleCommand(raw){
   if(cmd === "buy" && sub){
     tryBuy(sub, arg);
   } else if(cmd === "status"){
-    printSystemLine(`config dump — rev.${state.coins}, income.L${state.incomeLevel}, odds.L${state.oddsLevel}, fx.L${state.fxLevel}, theme=${state.skinId}`);
+    printSystemLine(`config dump — rev.${state.coins}, income.L${state.incomeLevel}, odds.L${state.oddsLevel}, fx.L${state.fxLevel}, theme=${state.skinId}, queue=${state.pendingPulls}, rush=${state.priorityPulls}, roulette=${state.roulettePending}`);
   } else if(cmd === "help"){
     printSystemLine(`available directives: buy income | buy odds | buy fx | buy skin <default|neon|amber> | status | debug roulette [n] | debug jackpot | debug bonus | debug anomaly | reset confirm`);
   } else if(cmd === "debug" && sub === "roulette"){
