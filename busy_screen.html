@@ -341,7 +341,7 @@ const STATE_KEY = "busySimState";
 const DEFAULT_STATE = {
   coins: 0, incomeLevel: 0, oddsLevel: 0, skinId: "default", fxLevel: 0,
   pendingPulls: 0, priorityPulls: 0, resolvedSincePopup: 0, activeBuff: null,
-  roulettePending: 0, rouletteN: 2, fastSpinsRemaining: 0,
+  roulettePending: 0, rouletteN: 2, fastSpinsRemaining: 0, nextRushMilestone: 500,
 };
 
 function loadState(){
@@ -422,8 +422,29 @@ function renderQueue(){
   saveState();
 }
 
+// ラッシュ(priorityPulls)が500件溜まるたびに、30回分の10消費ボーナスと
+// 高速ルーレット20回分をその場で一気に発生させる
+function triggerRushMilestone(){
+  const div = document.createElement("div");
+  div.className = "log-line roulette-line";
+  div.textContent = "◆ backlog threshold reached — running batch verification";
+  logEl.appendChild(div);
+
+  for(let i = 0; i < 30; i++) showBonusPopup();
+
+  state.roulettePending += 20;
+  state.fastSpinsRemaining += 20;
+  saveState();
+  renderQueue();
+  showRouletteWaiting();
+}
+
 function injectBarrage(n){
   state.priorityPulls += n;
+  while(state.priorityPulls >= state.nextRushMilestone){
+    state.nextRushMilestone += 500;
+    triggerRushMilestone();
+  }
   renderQueue();
   if(!isProcessing) tick();
 }
