@@ -341,7 +341,7 @@ const STATE_KEY = "busySimState";
 const DEFAULT_STATE = {
   coins: 0, incomeLevel: 0, oddsLevel: 0, skinId: "default", fxLevel: 0,
   pendingPulls: 0, priorityPulls: 0, resolvedSincePopup: 0, activeBuff: null,
-  roulettePending: 0, rouletteN: 2, fastSpinsRemaining: 0, fastRushRemaining: 0,
+  roulettePending: 0, rouletteN: 2, fastSpinsRemaining: 0,
 };
 
 function loadState(){
@@ -430,10 +430,6 @@ function triggerRushMilestone(){
   div.className = "log-line roulette-line";
   div.textContent = "◆ backlog threshold reached — running batch verification";
   logEl.appendChild(div);
-
-  // この先の500件を0.1秒/件の高速消化にする。その間は通常通り
-  // 10件消化ごとのボーナス抽選が自然に(何度も)発生する
-  state.fastRushRemaining += 500;
 
   // 高速ルーレットも20回分キューに追加(通常のラッシュ消化と並行して積む)
   state.roulettePending += 20;
@@ -962,6 +958,9 @@ function tick(){
 
   // 弾幕(無償の0.5秒ログ)が残っていれば、通常キューより優先して消化する
   if(state.priorityPulls > 0){
+    // 在庫(消化前の残数)が500件以上残っている間はずっと高速消化のまま
+    const rushDelay = state.priorityPulls >= RUSH_MILESTONE_STEP ? FAST_RUSH_MS : PRIORITY_PULL_MS;
+
     state.priorityPulls--;
     renderQueue();
 
@@ -979,12 +978,6 @@ function tick(){
       showBonusPopup();
     }
 
-    // 500件溜まった直後などは、この分だけ0.1秒間隔の高速消化にする
-    let rushDelay = PRIORITY_PULL_MS;
-    if(state.fastRushRemaining > 0){
-      state.fastRushRemaining--;
-      rushDelay = FAST_RUSH_MS;
-    }
     saveState();
 
     statusText.textContent = rushDelay === FAST_RUSH_MS ? "processing… (rush ×fast)" : "processing… (rush)";
