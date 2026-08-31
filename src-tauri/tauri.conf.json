@@ -1,0 +1,40 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "busy-simulator",
+  "version": "0.1.0",
+  "identifier": "com.busysimulator.desktop",
+  "build": {
+    "frontendDist": "../www",
+    "beforeBuildCommand": "cp busy_screen.html www/busy_screen.html",
+    "beforeDevCommand": "cp busy_screen.html www/busy_screen.html"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "System Process",
+        "url": "busy_screen.html",
+        "width": 760,
+        "height": 600,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "android": {
+      "debugApplicationIdSuffix": ".debug"
+    }
+  }
+}
