@@ -353,7 +353,9 @@ function loadState(){
     return { ...DEFAULT_STATE };
   }
 }
+let resetting = false; // trueの間はsaveState()を一切実行しない(reset確定直後の再保存レース対策)
 function saveState(){
+  if(resetting) return;
   try{ localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch(e){}
 }
 
@@ -863,9 +865,9 @@ function handleCommand(raw){
     triggerCriticalEvent(20000);
     printSystemLine(`debug: forced anomaly detected (20s)`);
   } else if(cmd === "reset" && sub === "confirm"){
+    resetting = true; // 以降のsaveState()を無効化してから消す(遅延リロード中の再保存レースを防ぐ)
     try{ localStorage.removeItem(STATE_KEY); } catch(e){}
-    printSystemLine(`config reset — reloading…`);
-    setTimeout(() => location.reload(), 400);
+    location.reload();
   } else if(cmd === "reset"){
     printSystemLine(`this clears all rev/upgrades/queues. type "reset confirm" to proceed`);
   } else {
