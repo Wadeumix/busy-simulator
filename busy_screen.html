@@ -423,17 +423,19 @@ function renderQueue(){
   saveState();
 }
 
-// ラッシュ(priorityPulls)が500件溜まるたびに、30回分の10消費ボーナスと
-// 高速ルーレット20回分をその場で一気に発生させる
+// ラッシュ(priorityPulls)が500件溜まるたびに、0.1秒高速消化の間に
+// 自然発生するボーナス抽選に加えて、高速ルーレット4回分を追加で発生させる。
+// (以前は20回にしていたが、ルーレット赤=スーパージャックポットが
+//  さらに大量のラッシュを生む→また500件突破→さらにルーレット…という
+//  自己増殖ループになっていたため、誘発数を絞って自然に収束させる)
 function triggerRushMilestone(){
   const div = document.createElement("div");
   div.className = "log-line roulette-line";
   div.textContent = "◆ backlog threshold reached — running batch verification";
   logEl.appendChild(div);
 
-  // 高速ルーレットも20回分キューに追加(通常のラッシュ消化と並行して積む)
-  state.roulettePending += 20;
-  state.fastSpinsRemaining += 20;
+  state.roulettePending += 4;
+  state.fastSpinsRemaining += 4;
   saveState();
   renderQueue();
   showRouletteWaiting();
