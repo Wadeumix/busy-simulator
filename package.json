@@ -1,0 +1,13 @@
+{
+  "name": "busy-simulator",
+  "version": "1.0.0",
+  "description": "Fake work window with a hidden coin-pusher idle game",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^32.3.3"
+  }
+}

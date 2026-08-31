@@ -14,7 +14,18 @@
 
 ## 使い方
 
-### macOS（推奨: Chromeアプリモード）
+### Electron版（推奨: ブラウザに依存しないネイティブアプリ）
+
+Node.js/npmが入っていれば以下でElectron製の単体アプリとして起動できます（初回のみElectron本体のダウンロードが入ります）。
+
+```bash
+npm install
+npm start
+```
+
+Chromeなどのブラウザに依存せず、`busy-simulator`という独立したアプリとして動作します。将来的にWindows向けのビルドにも対応予定です。
+
+### macOS（Chromeアプリモード）
 
 ```bash
 ./open_busy_window.sh
