@@ -418,7 +418,7 @@ const PRIORITY_PULL_REWARD = 1;
 function renderQueue(){
   const total = state.pendingPulls + state.priorityPulls + state.roulettePending;
   queueText.textContent = total > 0
-    ? `queue:${total}${state.priorityPulls > 0 ? ` (rush:${state.priorityPulls})` : ""}`
+    ? `queue:${formatCoins(total)}${state.priorityPulls > 0 ? ` (rush:${formatCoins(state.priorityPulls)})` : ""}`
     : "";
   saveState();
 }
