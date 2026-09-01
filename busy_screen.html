@@ -354,7 +354,23 @@ function loadState(){
   }
 }
 let resetting = false; // trueの間はsaveState()を一切実行しない(reset確定直後の再保存レース対策)
+// 高速ラッシュ中はtick()のたびに毎回saveState()が呼ばれるため、そのままだと
+// localStorageへの書き込みが1秒間に何十〜何百回も発生し、WebKit側のストレージIPCが
+// 詰まってクラッシュする原因になっていた。実際の書き込みは間引いて最後の状態だけ反映する
+let saveStatePending = false;
 function saveState(){
+  if(resetting) return;
+  if(saveStatePending) return;
+  saveStatePending = true;
+  setTimeout(() => {
+    saveStatePending = false;
+    if(resetting) return;
+    try{ localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch(e){}
+  }, 300);
+}
+
+// reset confirm時など、保留中の書き込みを待たず即座に反映させたい場合に使う
+function saveStateNow(){
   if(resetting) return;
   try{ localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch(e){}
 }
@@ -586,15 +602,29 @@ function openRouletteTauriWindow(){
       height: 300,
       resizable: false,
     });
+
+    // "準備完了"が何らかの理由(roulette.html側のスクリプトエラーなど)で
+    // 届かない場合に永遠に待ち続けないよう、タイムアウトで失敗扱いにする
+    const timeoutId = setTimeout(() => {
+      if(settled) return;
+      settled = true;
+      printSystemLine(`debug: roulette window did not signal ready within 5s`);
+      rouletteTauriWindow = null;
+      resolve(null);
+    }, 5000);
+
     const readyPromise = event.listen("roulette-ready", () => {
       if(settled) return;
       settled = true;
+      clearTimeout(timeoutId);
       readyPromise.then(un => un());
       resolve(win);
     });
-    win.once("tauri://error", () => {
+    win.once("tauri://error", (e) => {
       if(settled) return;
       settled = true;
+      clearTimeout(timeoutId);
+      printSystemLine(`debug: roulette window failed to load — ${JSON.stringify(e && e.payload)}`);
       rouletteTauriWindow = null;
       resolve(null);
     });

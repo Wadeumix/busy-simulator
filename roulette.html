@@ -74,6 +74,13 @@ const resultEl = document.getElementById("result");
 const subEl = document.getElementById("sub");
 const resultBox = document.getElementById("resultBox");
 
+// window.__TAURI__が何らかの理由で使えない場合、原因が分かるようこの画面に直接出す
+// (このウィンドウは別プロセスなのでメイン側のログやコンソールからは見えないため)
+if(!window.__TAURI__){
+  counterEl.textContent = "ERROR: window.__TAURI__ is not available in this window";
+  throw new Error("window.__TAURI__ is not available");
+}
+
 const { event } = window.__TAURI__;
 
 function renderWaiting(stackCount){
@@ -124,16 +131,21 @@ function runSpin(payload){
   advance();
 }
 
-event.listen("roulette-spin", (e) => runSpin(e.payload));
-event.listen("roulette-waiting", (e) => renderWaiting(e.payload.stack));
-event.listen("roulette-result", (e) => {
-  resultEl.textContent = e.payload.label;
-  subEl.textContent = e.payload.sub;
-  resultBox.classList.add("show");
+// event.listen()はIPC経由の非同期処理なので、登録の完了を待ってから
+// "準備できた"を知らせないと、直後に届くroulette-spinを取りこぼす
+async function init(){
+  await event.listen("roulette-spin", (e) => runSpin(e.payload));
+  await event.listen("roulette-waiting", (e) => renderWaiting(e.payload.stack));
+  await event.listen("roulette-result", (e) => {
+    resultEl.textContent = e.payload.label;
+    subEl.textContent = e.payload.sub;
+    resultBox.classList.add("show");
+  });
+  await event.emit("roulette-ready", {});
+}
+init().catch((err) => {
+  counterEl.textContent = "ERROR: " + (err && err.message ? err.message : String(err));
 });
-
-// メインウィンドウへ「表示準備できた」ことを知らせる(先に送られたイベントの取りこぼし防止)
-event.emit("roulette-ready", {});
 </script>
 </body>
 </html>
