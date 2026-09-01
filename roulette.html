@@ -103,24 +103,16 @@ function runSpin(payload){
 
   const totalSteps = targetIndex + 1 + segments.length * 3; // 見た目上、最低3周はする
 
-  // 進捗60%までは一定間隔で一気に駆け抜け、残り40%だけsmoothstepで減速する
-  const FAST_FRACTION = 0.6;
-  const fastSteps = Math.max(1, Math.floor(totalSteps * FAST_FRACTION));
-  const decelSteps = totalSteps - fastSteps;
-  const FAST_DELAY_MS = 12;
-  const fastTotal = fastSteps * FAST_DELAY_MS;
-  const remainingTime = Math.max(0, totalMs - fastTotal);
-
-  const decelWeights = [];
-  for(let i = 0; i < decelSteps; i++){
-    const t = (i + 1) / decelSteps;
-    decelWeights.push(t * t * (3 - 2 * t)); // smoothstep: S字カーブで減速
-  }
-  const decelSum = decelWeights.reduce((a, b) => a + b, 0) || 1;
-
+  // 等加速度(一定の摩擦)で止まる実際の物理運動から導いた時刻-進捗の関係を使う。
+  // 距離s(進捗0〜1)から経過時間の割合τを逆算すると τ(s) = 1 - √(1 - s) になる
+  // (初速最大→時間とともに一定の割合で減速→最後にちょうど止まる、という単一の連続カーブ)
+  const timeAtProgress = (s) => 1 - Math.sqrt(Math.max(0, 1 - s));
   const delays = [];
-  for(let i = 0; i < fastSteps; i++) delays.push(FAST_DELAY_MS);
-  for(let i = 0; i < decelSteps; i++) delays.push((decelWeights[i] / decelSum) * remainingTime);
+  for(let i = 0; i < totalSteps; i++){
+    const s0 = i / totalSteps;
+    const s1 = (i + 1) / totalSteps;
+    delays.push((timeAtProgress(s1) - timeAtProgress(s0)) * totalMs);
+  }
 
   let step = 0;
   let prevTile = null;

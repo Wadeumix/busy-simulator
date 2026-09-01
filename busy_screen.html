@@ -321,7 +321,7 @@ function triggerCriticalEvent(duration){
   injectBarrage(50);
 
   // 高速ルーレットを10回分キューに追加(次に消化される10回は通常より短い時間で回る)
-  state.roulettePending += 10;
+  addRoulettePending(10);
   state.fastSpinsRemaining += 10;
   saveState();
   renderQueue();
@@ -452,7 +452,7 @@ function triggerRushMilestone(){
   div.textContent = "◆ backlog threshold reached — running batch verification";
   logEl.appendChild(div);
 
-  state.roulettePending += 4;
+  addRoulettePending(4);
   state.fastSpinsRemaining += 4;
   saveState();
   renderQueue();
@@ -461,11 +461,28 @@ function triggerRushMilestone(){
 
 const RUSH_MILESTONE_STEP = 500;
 
+// ジャックポット→ラッシュ増加→ボーナス連発→また大量ラッシュ…という自己増殖ループが
+// 何らかの形で再発しても、キューが数百万〜数億件のような非現実的な規模まで
+// 際限なく膨らんでクラッシュ/フリーズを招かないよう、上限を設けておく
+const PRIORITY_PULLS_CAP = 50000;
+const PENDING_PULLS_CAP = 50000;
+const ROULETTE_PENDING_CAP = 200;
+
+function addPriorityPulls(n){
+  state.priorityPulls = Math.min(PRIORITY_PULLS_CAP, state.priorityPulls + n);
+}
+function addPendingPulls(n){
+  state.pendingPulls = Math.min(PENDING_PULLS_CAP, state.pendingPulls + n);
+}
+function addRoulettePending(n){
+  state.roulettePending = Math.min(ROULETTE_PENDING_CAP, state.roulettePending + n);
+}
+
 function injectBarrage(n){
   // 累積カウンターではなく、現在のラッシュ在庫(スタック数)自体が
   // 500の倍数をいくつ跨いだかで判定する(途中からの再開でも正しく動く)
   const before = Math.floor(state.priorityPulls / RUSH_MILESTONE_STEP);
-  state.priorityPulls += n;
+  addPriorityPulls(n);
   const after = Math.floor(state.priorityPulls / RUSH_MILESTONE_STEP);
   for(let i = 0; i < after - before; i++) triggerRushMilestone();
 
@@ -494,13 +511,13 @@ document.addEventListener("click", (e) => {
 // ジャックポット(バラージ)は0.5秒ラッシュ中でも重ねて適用される(倍率バフも乗る)
 const BONUS_TABLE = [
   { weight: 40, label: "nothing",                    sub: "特に変化なし",                    apply: () => {} },
-  { weight: 25, label: "backlog +5 items",           sub: "ログキューが5件増加",              apply: () => { state.pendingPulls += 5;  renderQueue(); } },
-  { weight: 15, label: "backlog +10 items",          sub: "ログキューが10件増加",             apply: () => { state.pendingPulls += 10; renderQueue(); } },
-  { weight: 8,  label: "backlog +20 items",          sub: "ログキューが20件増加",             apply: () => { state.pendingPulls += 20; renderQueue(); } },
+  { weight: 25, label: "backlog +5 items",           sub: "ログキューが5件増加",              apply: () => { addPendingPulls(5);  renderQueue(); } },
+  { weight: 15, label: "backlog +10 items",          sub: "ログキューが10件増加",             apply: () => { addPendingPulls(10); renderQueue(); } },
+  { weight: 8,  label: "backlog +20 items",          sub: "ログキューが20件増加",             apply: () => { addPendingPulls(20); renderQueue(); } },
   { weight: 6,  label: "throughput ×2 (short)",      sub: "次の5ログ分の獲得revが2倍",         apply: () => { state.activeBuff = { remaining: 5,  multiplier: 2 }; saveState(); } },
   { weight: 3,  label: "throughput ×2 (extended)",   sub: "次の20ログ分の獲得revが2倍",        apply: () => { state.activeBuff = { remaining: 20, multiplier: 2 }; saveState(); } },
   // ルーレットは専用キュー(roulettePending)に積む。ラッシュ終了後、通常キューより先に消化される
-  { weight: 2,  label: "manual review required",     sub: "ルーレットが1件キューに追加",       apply: () => { state.roulettePending += 1; renderQueue(); showRouletteWaiting(); } },
+  { weight: 2,  label: "manual review required",     sub: "ルーレットが1件キューに追加",       apply: () => { addRoulettePending(1); renderQueue(); showRouletteWaiting(); } },
   { weight: 1,  label: "critical patch escalation",  sub: "次の20ログ分の獲得revが20倍 + 無償ログ100件が割り込み", apply: () => { state.activeBuff = { remaining: 20, multiplier: 20 }; saveState(); injectBarrage(100); } },
 ];
 const BONUS_TOTAL_WEIGHT = BONUS_TABLE.reduce((a, b) => a + b.weight, 0);
@@ -547,7 +564,7 @@ const ROULETTE_COLORS = {
 };
 function applyRouletteColor(color){
   if(color === "blue"){
-    state.pendingPulls += 50;
+    addPendingPulls(50);
     renderQueue();
   } else if(color === "yellow"){
     injectBarrage(100); // 500件マイルストーン判定を通すため、直接加算せずinjectBarrage経由にする
@@ -841,24 +858,16 @@ function spinRouletteOnce(win, onDone){
   const LOOPS = isFast ? randInt(2, 4) : randInt(12, 20);
   const totalSteps = LOOPS * segments.length + targetIndex + 1;
 
-  // 進捗60%までは一定間隔で一気に駆け抜け、残り40%だけsmoothstep(3t²-2t³)で減速する
-  const FAST_FRACTION = 0.6;
-  const fastSteps = Math.max(1, Math.floor(totalSteps * FAST_FRACTION));
-  const decelSteps = totalSteps - fastSteps;
-  const FAST_DELAY_MS = 12;
-  const fastTotal = fastSteps * FAST_DELAY_MS;
-  const remainingTime = Math.max(0, TOTAL_SPIN_MS - fastTotal);
-
-  const decelWeights = [];
-  for(let i = 0; i < decelSteps; i++){
-    const t = (i + 1) / decelSteps;
-    decelWeights.push(t * t * (3 - 2 * t));
-  }
-  const decelSum = decelWeights.reduce((a, b) => a + b, 0) || 1;
-
+  // 等加速度(一定の摩擦)で止まる実際の物理運動から導いた時刻-進捗の関係を使う。
+  // 距離s(進捗0〜1)から経過時間の割合τを逆算すると τ(s) = 1 - √(1 - s) になる
+  // (初速最大→時間とともに一定の割合で減速→最後にちょうど止まる、という単一の連続カーブ)
+  const timeAtProgress = (s) => 1 - Math.sqrt(Math.max(0, 1 - s));
   const delays = [];
-  for(let i = 0; i < fastSteps; i++) delays.push(FAST_DELAY_MS);
-  for(let i = 0; i < decelSteps; i++) delays.push((decelWeights[i] / decelSum) * remainingTime);
+  for(let i = 0; i < totalSteps; i++){
+    const s0 = i / totalSteps;
+    const s1 = (i + 1) / totalSteps;
+    delays.push((timeAtProgress(s1) - timeAtProgress(s0)) * TOTAL_SPIN_MS);
+  }
 
   let step = 0;
   let prevTile = null;
@@ -1010,7 +1019,7 @@ function handleCommand(raw){
     printSystemLine(`available directives: buy income | buy odds | buy fx | buy skin <default|neon|amber> | status | debug roulette [n] | debug jackpot | debug bonus | debug anomaly | reset confirm`);
   } else if(cmd === "debug" && sub === "roulette"){
     const n = Math.max(1, parseInt(arg, 10) || 1);
-    state.roulettePending += n;
+    addRoulettePending(n);
     renderQueue();
     showRouletteWaiting();
     printSystemLine(`debug: queued ${n} roulette slot(s)`);
