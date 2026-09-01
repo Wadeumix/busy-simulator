@@ -5,10 +5,11 @@
   "identifier": "com.busysimulator.desktop",
   "build": {
     "frontendDist": "../www",
-    "beforeBuildCommand": "cp busy_screen.html www/busy_screen.html",
-    "beforeDevCommand": "cp busy_screen.html www/busy_screen.html"
+    "beforeBuildCommand": "cp busy_screen.html www/busy_screen.html && cp roulette.html www/roulette.html",
+    "beforeDevCommand": "cp busy_screen.html www/busy_screen.html && cp roulette.html www/roulette.html"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "System Process",

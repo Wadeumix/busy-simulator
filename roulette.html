@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>System Process</title>
+<style>
+  *{box-sizing:border-box;}
+  html,body{ height:100%; }
+  body{
+    margin:0; display:flex; flex-direction:column;
+    background:#161b22; color:#c9d1d9; font-family:"SF Mono","Consolas","Menlo",monospace;
+    cursor:wait;
+  }
+  .topbar{
+    background:#21262d; padding:10px 14px; display:flex; align-items:center; gap:8px;
+    border-bottom:1px solid #30363d; font-size:13px; color:#8b949e; flex-shrink:0;
+  }
+  .body{ padding:18px 20px; flex:1; display:flex; flex-direction:column; }
+  .subline{ font-size:12px; color:#8b949e; margin-bottom:6px; }
+  .stack{ font-size:11px; color:#8b949e; margin-bottom:10px; min-height:14px; }
+  .viewport{
+    overflow:hidden; width:100%; height:8px;
+    border:1px solid #30363d; border-radius:4px; background:#010409;
+  }
+  .strip{ display:flex; gap:1px; height:100%; }
+  .tile{
+    flex:1 1 0; height:100%; border-radius:0;
+    opacity:.35; transition:opacity .12s ease;
+  }
+  .tile.active{ opacity:1; }
+  .t-blue{ background:#58a6ff; }
+  .t-yellow{ background:#c9a227; }
+  .t-green{ background:#3fb950; }
+  .t-orange{ background:#c9822f; }
+  .t-red{ background:#f85149; }
+  .result-box{
+    margin-top:16px; background:#161b22; border:1px solid #30363d; border-radius:6px;
+    padding:14px 18px; opacity:0; transition:opacity .2s ease;
+  }
+  .result-box.show{ opacity:1; }
+  .result-box .box-title{
+    font-size:11px; color:#8b949e; letter-spacing:.03em;
+    border-bottom:1px solid #30363d; padding-bottom:6px; margin-bottom:8px;
+  }
+  .result-box .result{ font-size:13px; color:#c9d1d9; margin:0 0 3px; }
+  .result-box .result::before{ content:"✓ "; color:#3fb950; }
+  .result-box .sub{ font-size:12px; color:#8b949e; }
+</style>
+</head>
+<body>
+  <div class="topbar">build-pipeline — verification</div>
+  <div class="body">
+    <div class="subline" id="counter">resolving candidate patch…</div>
+    <div class="stack" id="stack"></div>
+    <div class="viewport" id="viewport">
+      <div class="strip" id="strip"></div>
+    </div>
+    <div class="result-box" id="resultBox">
+      <div class="box-title">config sync — patch candidate applied</div>
+      <div class="result" id="result"></div>
+      <div class="sub" id="sub"></div>
+    </div>
+  </div>
+
+<script>
+// ---- このウィンドウ自身は演出の再生だけを担当する ----
+// 当選抽選・報酬適用・状態(rev等)の管理は全てメインウィンドウ側(busy_screen.html)が持っていて、
+// ここへはTauriのイベント経由で「どのコマで、どれくらいの時間かけて止まるか」だけが渡ってくる。
+// アニメーションが終わったら'roulette-landed'を送り返し、メインが結果テキストを送ってくる。
+const strip = document.getElementById("strip");
+const counterEl = document.getElementById("counter");
+const stackEl = document.getElementById("stack");
+const resultEl = document.getElementById("result");
+const subEl = document.getElementById("sub");
+const resultBox = document.getElementById("resultBox");
+
+const { event } = window.__TAURI__;
+
+function renderWaiting(stackCount){
+  resultBox.classList.remove("show");
+  resultEl.textContent = "";
+  subEl.textContent = "";
+  counterEl.textContent = "queued — waiting for current workload to clear…";
+  stackEl.textContent = stackCount > 0 ? `stack: +${stackCount}` : "";
+}
+
+function runSpin(payload){
+  const { segments, targetIndex, totalMs, stack } = payload;
+  resultEl.textContent = "";
+  subEl.textContent = "";
+  resultBox.classList.remove("show");
+  stackEl.textContent = stack > 0 ? `stack: +${stack}` : "";
+
+  strip.innerHTML = segments.map(c => `<div class="tile t-${c}"></div>`).join("");
+  const tiles = Array.from(strip.children);
+
+  const totalSteps = targetIndex + 1 + segments.length * 3; // 見た目上、最低3周はする
+  const weights = [];
+  for(let i = 0; i < totalSteps; i++){
+    const t = (i + 1) / totalSteps;
+    weights.push(t * t * (3 - 2 * t)); // smoothstep: S字カーブで減速
+  }
+  const weightSum = weights.reduce((a, b) => a + b, 0) || 1;
+  const delays = weights.map(w => (w / weightSum) * totalMs);
+
+  let step = 0;
+  let prevTile = null;
+
+  function advance(){
+    if(prevTile) prevTile.classList.remove("active");
+    const idx = step % segments.length;
+    tiles[idx].classList.add("active");
+    prevTile = tiles[idx];
+    step++;
+    const pct = Math.min(100, Math.round((step / totalSteps) * 100));
+    counterEl.textContent = `resolving candidate patch — ${pct}%`;
+
+    if(step >= totalSteps){
+      event.emit("roulette-landed", {});
+      return;
+    }
+    setTimeout(advance, delays[step]);
+  }
+  advance();
+}
+
+event.listen("roulette-spin", (e) => runSpin(e.payload));
+event.listen("roulette-waiting", (e) => renderWaiting(e.payload.stack));
+event.listen("roulette-result", (e) => {
+  resultEl.textContent = e.payload.label;
+  subEl.textContent = e.payload.sub;
+  resultBox.classList.add("show");
+});
+
+// メインウィンドウへ「表示準備できた」ことを知らせる(先に送られたイベントの取りこぼし防止)
+event.emit("roulette-ready", {});
+</script>
+</body>
+</html>

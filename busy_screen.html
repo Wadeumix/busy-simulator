@@ -550,7 +550,12 @@ function applyRouletteColor(color){
   if(!isProcessing) tick();
 }
 
-let rouletteWin = null;
+// Tauriアプリ内(WKWebViewなど)ではJSの素のwindow.open()が新しいOSウィンドウを
+// 作らない(何もせずnullを返す)ため、ルーレットの別ウィンドウ表示はTauriかどうかで実装を分ける
+const IS_TAURI = !!(window.__TAURI__);
+
+let rouletteWin = null; // 非Tauri: window.openで得られるWindowオブジェクト
+let rouletteTauriWindow = null; // Tauri: WebviewWindowインスタンス
 let rouletteActive = false; // trueの間はtick()が新しいルーレットセッションを開始しない
 
 function shuffled(arr){
@@ -563,7 +568,121 @@ function shuffled(arr){
 }
 
 function rouletteWindowClosedOrMissing(){
+  if(IS_TAURI) return !rouletteTauriWindow;
   return !rouletteWin || rouletteWin.closed;
+}
+
+// ---- Tauri用: roulette.htmlを別のWebviewWindowとして開き、
+//      イベント経由で演出パラメータを送り、着地結果を受け取る ----
+function openRouletteTauriWindow(){
+  const { WebviewWindow } = window.__TAURI__.webviewWindow;
+  const { event } = window.__TAURI__;
+  return new Promise((resolve) => {
+    let settled = false;
+    const win = new WebviewWindow("roulette", {
+      url: "roulette.html",
+      title: "System Process",
+      width: 360,
+      height: 300,
+      resizable: false,
+    });
+    const readyPromise = event.listen("roulette-ready", () => {
+      if(settled) return;
+      settled = true;
+      readyPromise.then(un => un());
+      resolve(win);
+    });
+    win.once("tauri://error", () => {
+      if(settled) return;
+      settled = true;
+      rouletteTauriWindow = null;
+      resolve(null);
+    });
+    win.once("tauri://destroyed", () => {
+      rouletteTauriWindow = null;
+    });
+  });
+}
+
+async function ensureRouletteWindowTauri(){
+  if(!rouletteTauriWindow){
+    rouletteTauriWindow = await openRouletteTauriWindow();
+  }
+  return rouletteTauriWindow;
+}
+
+async function showRouletteWaitingTauri(){
+  if(state.roulettePending <= 0) return;
+  if(rouletteActive) return;
+  const win = await ensureRouletteWindowTauri();
+  if(!win) return;
+  window.__TAURI__.event.emit("roulette-waiting", { stack: state.roulettePending });
+}
+
+async function startRouletteSequenceTauri(){
+  const win = await ensureRouletteWindowTauri();
+  if(!win){
+    // ウィンドウを開けなかった場合は演出なしで抽選だけ実行してキューを消化する
+    applyRouletteColor(pick(ROULETTE_WHEEL));
+    while(state.roulettePending > 0){
+      state.roulettePending--;
+      applyRouletteColor(pick(ROULETTE_WHEEL));
+    }
+    renderQueue();
+    rouletteActive = false;
+    return;
+  }
+
+  const { event } = window.__TAURI__;
+
+  async function runNext(){
+    if(rouletteWindowClosedOrMissing()){
+      while(state.roulettePending > 0){
+        state.roulettePending--;
+        applyRouletteColor(pick(ROULETTE_WHEEL));
+      }
+      renderQueue();
+      rouletteActive = false;
+      return;
+    }
+
+    const segments = shuffled(ROULETTE_WHEEL);
+    const targetIndex = randInt(0, segments.length - 1);
+    const winningColor = segments[targetIndex];
+    const isFast = state.fastSpinsRemaining > 0;
+    if(isFast){
+      state.fastSpinsRemaining--;
+      saveState();
+    }
+    const totalMs = isFast ? 10000 : randInt(30000, 120000);
+
+    const unlisten = await event.listen("roulette-landed", () => {
+      unlisten();
+      applyRouletteColor(winningColor);
+      const info = ROULETTE_COLORS[winningColor];
+      if(!rouletteWindowClosedOrMissing()){
+        event.emit("roulette-result", { label: info.label, sub: info.sub() });
+      }
+
+      if(state.roulettePending > 0){
+        state.roulettePending--;
+        renderQueue();
+        setTimeout(runNext, 1800);
+      } else {
+        setTimeout(async () => {
+          if(rouletteTauriWindow){
+            try{ await rouletteTauriWindow.close(); } catch(e){}
+          }
+          rouletteTauriWindow = null;
+          rouletteActive = false;
+        }, 1800);
+      }
+    });
+
+    event.emit("roulette-spin", { segments, targetIndex, totalMs, stack: state.roulettePending });
+  }
+
+  runNext();
 }
 
 function buildRouletteWindow(){
@@ -645,6 +764,7 @@ function ensureRouletteWindow(){
 // ラッシュ処理中などでまだスピンを開始できない間も、ルーレットが積まれた時点で
 // 先にウィンドウだけ開いてスタック数と待機中である旨を表示しておく
 function showRouletteWaiting(){
+  if(IS_TAURI){ showRouletteWaitingTauri(); return; }
   if(state.roulettePending <= 0) return;
   if(rouletteActive) return; // 既にスピン中ならそちらの表示に任せる
   const win = ensureRouletteWindow();
@@ -734,6 +854,8 @@ function startRouletteSequence(){
   // rouletteActiveが立っている間は、tick()側が新たなセッションを起動しないようにする
   // (このセッション内で溜まった追加分のroulettePendingはrunNext()が1つずつ順番に消化する)
   rouletteActive = true;
+
+  if(IS_TAURI){ startRouletteSequenceTauri(); return; }
 
   const win = ensureRouletteWindow();
   if(!win){
