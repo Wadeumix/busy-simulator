@@ -607,9 +607,18 @@ function rouletteWindowClosedOrMissing(){
 
 // ---- Tauri用: roulette.htmlを別のWebviewWindowとして開き、
 //      イベント経由で演出パラメータを送り、着地結果を受け取る ----
-function openRouletteTauriWindow(){
+async function openRouletteTauriWindow(){
   const { WebviewWindow } = window.__TAURI__.webviewWindow;
   const { event } = window.__TAURI__;
+
+  // reset confirm等でメインウィンドウだけリロードされると、rouletteTauriWindowの
+  // JS上の参照は消えるが、OS側には前回の"roulette"ラベルのウィンドウが残ったままになりうる。
+  // そのまま新規作成すると「ラベルが既に存在する」エラーになるので、先に残骸を閉じておく
+  try{
+    const existing = await WebviewWindow.getByLabel("roulette");
+    if(existing) await existing.close();
+  } catch(e){}
+
   return new Promise((resolve) => {
     let settled = false;
     const win = new WebviewWindow("roulette", {
