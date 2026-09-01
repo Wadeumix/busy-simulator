@@ -102,13 +102,25 @@ function runSpin(payload){
   const tiles = Array.from(strip.children);
 
   const totalSteps = targetIndex + 1 + segments.length * 3; // 見た目上、最低3周はする
-  const weights = [];
-  for(let i = 0; i < totalSteps; i++){
-    const t = (i + 1) / totalSteps;
-    weights.push(t * t * (3 - 2 * t)); // smoothstep: S字カーブで減速
+
+  // 進捗60%までは一定間隔で一気に駆け抜け、残り40%だけsmoothstepで減速する
+  const FAST_FRACTION = 0.6;
+  const fastSteps = Math.max(1, Math.floor(totalSteps * FAST_FRACTION));
+  const decelSteps = totalSteps - fastSteps;
+  const FAST_DELAY_MS = 12;
+  const fastTotal = fastSteps * FAST_DELAY_MS;
+  const remainingTime = Math.max(0, totalMs - fastTotal);
+
+  const decelWeights = [];
+  for(let i = 0; i < decelSteps; i++){
+    const t = (i + 1) / decelSteps;
+    decelWeights.push(t * t * (3 - 2 * t)); // smoothstep: S字カーブで減速
   }
-  const weightSum = weights.reduce((a, b) => a + b, 0) || 1;
-  const delays = weights.map(w => (w / weightSum) * totalMs);
+  const decelSum = decelWeights.reduce((a, b) => a + b, 0) || 1;
+
+  const delays = [];
+  for(let i = 0; i < fastSteps; i++) delays.push(FAST_DELAY_MS);
+  for(let i = 0; i < decelSteps; i++) delays.push((decelWeights[i] / decelSum) * remainingTime);
 
   let step = 0;
   let prevTile = null;
