@@ -612,11 +612,14 @@ async function openRouletteTauriWindow(){
   const { event } = window.__TAURI__;
 
   // reset confirm等でメインウィンドウだけリロードされると、rouletteTauriWindowの
-  // JS上の参照は消えるが、OS側には前回の"roulette"ラベルのウィンドウが残ったままになりうる。
-  // そのまま新規作成すると「ラベルが既に存在する」エラーになるので、先に残骸を閉じておく
+  // JS上の参照は消えるが、OS側には前回の"roulette"ラベルのウィンドウが残ったままのことがある。
+  // 閉じて作り直すと一瞬ちらつくので、残っているならそのまま使い回す
   try{
     const existing = await WebviewWindow.getByLabel("roulette");
-    if(existing) await existing.close();
+    if(existing){
+      try{ await existing.show(); await existing.setFocus(); } catch(e){}
+      return existing;
+    }
   } catch(e){}
 
   return new Promise((resolve) => {
