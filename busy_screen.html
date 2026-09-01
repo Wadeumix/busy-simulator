@@ -987,7 +987,12 @@ function tick(){
     state.resolvedSincePopup++;
     if(state.resolvedSincePopup >= 10){
       state.resolvedSincePopup = 0;
-      showBonusPopup();
+      // rush×fast中は、ここでボーナスを毎回発生させると
+      // ジャックポット→ラッシュ増加→高速消化→ボーナス連発→また
+      // ジャックポット…の自己増殖ループになりやすいため、1/2の確率に絞る
+      if(rushDelay !== FAST_RUSH_MS || Math.random() < 0.5){
+        showBonusPopup();
+      }
     }
 
     saveState();
